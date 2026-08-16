@@ -81,30 +81,22 @@ npm run build
 
 ---
 
-## ☁️ Deployment on Netlify (Vinext Project Setup)
+## ☁️ Deployment on Netlify (Next.js Runtime)
 
-Since this project uses **Vinext** (Vite-based Next.js renderer), Vinext generates output in `dist/client` rather than standard `.next`.
+Vinext's own build (`npm run build`) targets Cloudflare Workers: it emits static assets into `dist/client` (no `index.html`, since HTML is streamed by a Worker at request time) plus a separate server bundle in `dist/server`. That output only renders correctly on a Workers-style runtime, so Netlify hosts this project via the standard Next.js build instead, using the `app/` directory that already backs the Vercel deployment (see `vercel.json`).
 
 A pre-configured `netlify.toml` file is included in the repository root:
 
 ```toml
 [build]
-  command = "npm run build"
-  publish = "dist/client"
-
-[build.environment]
-  NETLIFY_NEXT_PLUGIN_SKIP = "true"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+  command = "npm run build:next"
+  publish = ".next"
 ```
 
 ### Steps to Deploy:
 1. Connect your GitHub/GitLab repository to **Netlify**.
 2. Netlify will automatically detect `netlify.toml` with:
-   * **Build Command**: `npm run build`
-   * **Publish Directory**: `dist/client`
-   * **Next.js Plugin**: Skipped automatically via `NETLIFY_NEXT_PLUGIN_SKIP = "true"`
+   * **Build Command**: `npm run build:next`
+   * **Publish Directory**: `.next`
+   * **Next.js Plugin**: auto-detected and applied (Netlify's Next.js Runtime handles SSR via Functions/Edge Functions)
 3. Click **Deploy Site**.
