@@ -24,7 +24,9 @@
   flex-direction: column;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background-color: #020617;
+  overflow: hidden;
 }
 
 /* Header & Organ Selector */
@@ -32,10 +34,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 6px 12px;
   background-color: #0f172a;
   border-bottom: 2px solid #1e293b;
   z-index: 10;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .doom-brand {
@@ -108,6 +112,9 @@
   display: flex;
   gap: 6px;
   overflow-x: auto;
+  max-width: 100%;
+  padding-bottom: 2px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .organ-pill {
@@ -120,6 +127,8 @@
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -516,6 +525,112 @@
   margin: 16px 0 24px 0;
 }
 
+/* Touch Controls Overlay */
+.touch-controls-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 14;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 12px;
+}
+
+/* Virtual Joystick */
+.virtual-joystick-base {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.65);
+  border: 2px solid rgba(56, 189, 248, 0.5);
+  backdrop-filter: blur(4px);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  touch-action: none;
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+}
+
+.virtual-joystick-base.active {
+  border-color: #38bdf8;
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.virtual-joystick-stick {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #38bdf8 0%, #0284c7 100%);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+  pointer-events: none;
+}
+
+/* Touch Action Cluster */
+.touch-action-cluster {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.touch-up-down-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.touch-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.85);
+  border: 2px solid #38bdf8;
+  color: #fff;
+  border-radius: 50%;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+}
+
+.touch-btn.aux-btn {
+  width: 44px;
+  height: 44px;
+  border-color: #64748b;
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.touch-btn.aux-btn:active {
+  background: #38bdf8;
+  color: #000;
+}
+
+.touch-btn.fire-btn {
+  width: 72px;
+  height: 72px;
+  border-color: #ef4444;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.9) 0%, rgba(153, 27, 27, 0.9) 100%);
+  font-size: 18px;
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.5);
+}
+
+.touch-btn.fire-btn span {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  font-weight: 900;
+}
+
+.touch-btn.fire-btn:active {
+  transform: scale(0.95);
+  background: #f87171;
+}
+
 /* Classic Retro Doom Bottom HUD */
 .doom-hud {
   display: grid;
@@ -526,6 +641,114 @@
   padding: 6px 12px;
   gap: 8px;
   z-index: 10;
+}
+
+/* Responsive Styles for Mobile & Small Displays */
+@media (max-width: 768px) {
+  .doom-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .doom-brand {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .doom-brand small:not(.mode-badge) {
+    display: none;
+  }
+
+  .doom-organ-selector {
+    justify-content: space-between;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .selector-label {
+    display: none;
+  }
+
+  .mode-switch-btn {
+    font-size: 10px;
+    padding: 3px 6px;
+    margin-right: 0;
+  }
+
+  .start-modal {
+    padding: 16px;
+    max-width: 95%;
+  }
+
+  .start-modal h2 {
+    font-size: 20px;
+  }
+
+  .difficulty-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-hud-panel {
+    top: 6px;
+    padding: 8px 12px;
+    width: 96%;
+  }
+
+  .onboarding-hud-header strong {
+    font-size: 12px;
+  }
+
+  .onboarding-hud-body {
+    font-size: 11px;
+    margin-bottom: 8px;
+  }
+
+  .doom-hud {
+    grid-template-columns: repeat(3, 1fr);
+    height: auto;
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .portrait-block {
+    grid-column: span 1;
+    height: 48px;
+  }
+
+  .weapons-block {
+    grid-column: span 3;
+  }
+
+  .weapon-buttons {
+    justify-content: center;
+  }
+
+  .hud-value {
+    font-size: 18px;
+  }
+
+  .virtual-joystick-base {
+    width: 80px;
+    height: 80px;
+  }
+
+  .virtual-joystick-stick {
+    width: 36px;
+    height: 36px;
+  }
+
+  .touch-btn.fire-btn {
+    width: 60px;
+    height: 60px;
+    font-size: 15px;
+  }
+
+  .touch-btn.aux-btn {
+    width: 38px;
+    height: 38px;
+  }
 }
 
 .hud-block {
