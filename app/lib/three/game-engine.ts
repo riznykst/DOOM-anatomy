@@ -410,7 +410,7 @@ export class DoomGameEngine {
       const mesh = new THREE.Mesh(geom, mat);
       const group = new THREE.Group();
       group.add(mesh);
-      this.organ = { pivot: group, meshes: [mesh], animations: [] };
+      this.organ = { url: organData.model, pivot: group, meshes: [mesh], mixer: null };
       this.scene.add(group);
     }
   }
@@ -911,8 +911,7 @@ export class DoomGameEngine {
   private updateParticles(delta: number) {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.position = p.mesh.position;
-      p.position.add(p.velocity.clone().multiplyScalar(delta));
+      p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
       p.life -= delta;
 
       if (p.scaleSpeed) {
