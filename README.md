@@ -1,98 +1,91 @@
-# vinext-starter
+# DOOM: BIO-DEFENDER 3D — System Infection Lockdown
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+An immersive retro 3D FPS bio-shooter built with **Next.js / Vinext**, **Three.js**, **React 19**, and **Web Audio API**.
 
-## Prerequisites
+---
 
+## 🎮 Overview
+
+**DOOM: BIO-DEFENDER 3D** transforms a 3D medical anatomy viewer into a fast-paced 90s retro action FPS shooter. Take control of an elite nano-drone or bio-immunocyte entering 9 distinct human organ systems to purge aggressive viral infections, toxic bacterial rods, and corrupted white blood cell necromancers before total organ collapse occurs.
+
+---
+
+## 🏰 Legacy Architecture & Origin
+
+Originally founded as an anatomical educational showcase (*Anatomy Atelier*), the codebase provided a high-precision 3D WebGL renderer and 9 high-quality GLTF/GLB organ models.
+
+### Legacy Transition Matrix
+
+| Legacy Component | Original Role | Transformed Retro Bio-Shooter Role |
+| :--- | :--- | :--- |
+| `app/lib/three/viewer.ts` | Static OrbitControls specimen viewer | Legacy asset loader foundation & lighting environment |
+| `app/lib/three/loaders.ts` | GLTF/GLB 3D Model Manager | Dynamic organ 3D arena model asset manager |
+| `app/lib/anatomy-data.ts` | Medical organ data & hotspots | Organ levels, 3D coordinate target anchors & system stats |
+| `app/lib/three/game-engine.ts` | *NEW Core Game Engine* | FPS Camera movement (WASD + Pointer Lock), bullet physics, Web Audio synthesizer, enemy AI |
+| `app/components/DoomBioShooter.tsx` | *NEW React UI & HUD* | Classic Doom bottom HUD, face portrait, health/armor meters, weapon selection, organ level selector |
+
+---
+
+## 🔫 Game Features & Weapons
+
+### 3 Distinct Weapon Systems
+
+1. **Plasma Antibody Gun** (`Key 1`):
+   * Rapid-fire bio-plasma bolts. Excellent for clearing fast-moving virus clusters.
+2. **Bio-Shotgun** (`Key 2`):
+   * Heavy 8-pellet spread blast. Devastating at close range against tanky bacterial rods.
+3. **Nanite Annihilator** (`Key 3`):
+   * High-explosive heavy nanite warhead with massive area-of-effect splash damage against corrupted bosses.
+
+---
+
+## 👾 Enemy Bestiary
+
+1. **Virus (Melee Rusher)**:
+   * Fast, red spiky icosahedron that swarms the player or organ center in groups.
+2. **Bacteria (Ranged Toxic Spitter)**:
+   * Tanky yellow capsule/rod shape that shoots toxic projectiles from a distance.
+3. **Infected Leukocyte Necromancer (Boss / Summoner)**:
+   * Corrupted purple white blood cell surrounded by a dark aura. Summons minion viruses and fires heavy corruption energy orbs.
+
+---
+
+## 🕹️ Controls
+
+* **WASD / Space / Shift**: 3D Drone Movement (Forward, Left, Back, Right, Ascend, Descend)
+* **Mouse Aim + Left Click**: Fire active weapon (Requires Pointer Lock)
+* **Keys 1, 2, 3**: Switch Weapons (Plasma, Shotgun, Annihilator)
+* **Key R**: Quick restart level upon victory or defeat
+
+---
+
+## 🚀 Quick Start & Local Development
+
+### Prerequisites
 - Node.js `>=22.13.0`
-
-## Quick Start
+- npm `>=10.0.0`
 
 ```bash
+# Install dependencies
 npm install
+
+# Run local development server
 npm run dev
+
+# Run test suite
+npm test
+
+# Build production bundle
 npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+---
 
-## Included Shape
+## ☁️ Deployment on Netlify
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+1. Connect your GitHub / GitLab repository to **Netlify**.
+2. Configure build settings:
+   * **Branch**: `main`
+   * **Build Command**: `npm run build`
+   * **Publish Directory**: `.next`
+3. Click **Deploy**. Netlify will automatically trigger a build whenever changes are pushed to `main`.

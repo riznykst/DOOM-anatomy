@@ -1,0 +1,973 @@
+import * as THREE from "three";
+import { organById, organs, type Organ, type OrganId } from "../anatomy-data";
+import { AnatomyAssetManager, type LoadedOrgan } from "./loaders";
+
+export type WeaponType = "plasma" | "shotgun" | "annihilator";
+
+export type WeaponInfo = {
+  id: WeaponType;
+  name: string;
+  ammoName: string;
+  maxAmmo: number;
+  damage: number;
+  fireRate: number; // in seconds
+  ammoPerShot: number;
+  color: string;
+  description: string;
+};
+
+export const WEAPONS: Record<WeaponType, WeaponInfo> = {
+  plasma: {
+    id: "plasma",
+    name: "PLASMA ANTIBODY",
+    ammoName: "CELLS",
+    maxAmmo: 300,
+    damage: 25,
+    fireRate: 0.12,
+    ammoPerShot: 1,
+    color: "#38bdf8",
+    description: "Rapid-fire bio-plasma bolts. Excellent against fast virus clusters.",
+  },
+  shotgun: {
+    id: "shotgun",
+    name: "BIO-SHOTGUN",
+    ammoName: "SHELLS",
+    maxAmmo: 60,
+    damage: 18, // 8 pellets = 144 max dmg
+    fireRate: 0.75,
+    ammoPerShot: 1,
+    color: "#f97316",
+    description: "Heavy spread multi-pellet blast. Devastating at close range against tanky bacteria.",
+  },
+  annihilator: {
+    id: "annihilator",
+    name: "NANITE ANNIHILATOR",
+    ammoName: "ROCKETS",
+    maxAmmo: 30,
+    damage: 200,
+    fireRate: 1.2,
+    ammoPerShot: 1,
+    color: "#a855f7",
+    description: "Heavy explosive nanite warhead. Massive area-of-effect damage against Leukocyte Necromancers.",
+  },
+};
+
+export type EnemyType = "virus" | "bacteria" | "necromancer";
+
+export interface Enemy {
+  id: string;
+  type: EnemyType;
+  mesh: THREE.Group;
+  hp: number;
+  maxHp: number;
+  speed: number;
+  damage: number;
+  radius: number;
+  lastAttackTime: number;
+  attackCooldown: number;
+  shootCooldown: number;
+  lastShootTime: number;
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+}
+
+export interface Bullet {
+  mesh: THREE.Mesh;
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  life: number;
+  damage: number;
+  radius: number;
+  isEnemy: boolean;
+  color: string;
+  weaponType?: WeaponType;
+}
+
+export interface Particle {
+  mesh: THREE.Mesh | THREE.Points;
+  velocity: THREE.Vector3;
+  life: number;
+  maxLife: number;
+  scaleSpeed: number;
+}
+
+export type GameState = {
+  health: number;
+  maxHealth: number;
+  armor: number;
+  maxArmor: number;
+  ammo: Record<WeaponType, number>;
+  activeWeapon: WeaponType;
+  organIntegrity: number; // 0 - 100
+  score: number;
+  kills: number;
+  wave: number;
+  organId: OrganId;
+  isGameOver: boolean;
+  isVictory: boolean;
+  enemiesRemaining: number;
+  isPointerLocked: boolean;
+  isFiring: boolean;
+  faceExpression: "normal" | "firing" | "hurt" | "critical" | "dead";
+};
+
+type GameCallbacks = {
+  onStateUpdate: (state: GameState) => void;
+  onAudioTrigger?: (type: "shoot" | "hit" | "kill" | "player_hurt" | "pickup" | "wave") => void;
+};
+
+// Simple retro Web Audio API Synthesizer
+class SoundSynth {
+  private ctx: AudioContext | null = null;
+
+  constructor() {
+    // AudioContext created lazily on user interaction
+  }
+
+  private init() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) {
+        this.ctx = new AudioCtx();
+      }
+    }
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  play(type: "shoot_plasma" | "shoot_shotgun" | "shoot_annihilator" | "hit" | "kill" | "player_hurt" | "necromancer_summon") {
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    try {
+      if (type === "shoot_plasma") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(120, now + 0.1);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === "shoot_shotgun") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "square";
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(40, now + 0.25);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      } else if (type === "shoot_annihilator") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.linearRampToValueAtTime(400, now + 0.1);
+        osc.frequency.exponentialRampToValueAtTime(30, now + 0.45);
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.45);
+      } else if (type === "hit") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(180, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.08);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (type === "kill") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.linearRampToValueAtTime(80, now + 0.2);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      } else if (type === "player_hurt") {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.linearRampToValueAtTime(50, now + 0.3);
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      }
+    } catch {
+      // Audio fallback silent
+    }
+  }
+}
+
+export class DoomGameEngine {
+  private container: HTMLElement;
+  private renderer: THREE.WebGLRenderer;
+  private scene: THREE.Scene;
+  private camera: THREE.PerspectiveCamera;
+  private assets: AnatomyAssetManager;
+  private synth = new SoundSynth();
+
+  // Player / Movement
+  private playerPos = new THREE.Vector3(0, 0, 7);
+  private playerVel = new THREE.Vector3();
+  private cameraPitch = 0;
+  private cameraYaw = 0;
+  private keysPressed: Record<string, boolean> = {};
+  private isPointerLocked = false;
+  private isMouseDown = false;
+
+  // Organ Model
+  private organ: LoadedOrgan | null = null;
+  private currentOrganId: OrganId = "heart";
+
+  // Game Objects
+  private enemies: Enemy[] = [];
+  private bullets: Bullet[] = [];
+  private particles: Particle[] = [];
+
+  // Weapon State
+  private activeWeapon: WeaponType = "plasma";
+  private lastFireTime = 0;
+
+  // Game Stats
+  private health = 100;
+  private armor = 50;
+  private ammo: Record<WeaponType, number> = {
+    plasma: 150,
+    shotgun: 30,
+    annihilator: 10,
+  };
+  private organIntegrity = 100;
+  private score = 0;
+  private kills = 0;
+  private wave = 1;
+  private totalWaveEnemies = 8;
+  private isGameOver = false;
+  private isVictory = false;
+
+  private callbacks: GameCallbacks;
+  private clock = new THREE.Clock();
+  private animFrameId = 0;
+  private hurtFlashTimer = 0;
+
+  constructor(container: HTMLElement, callbacks: GameCallbacks) {
+    this.container = container;
+    this.callbacks = callbacks;
+
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x0a0510, 0.04);
+
+    this.camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 100);
+    this.camera.position.copy(this.playerPos);
+
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    this.renderer.setSize(container.clientWidth, container.clientHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.2;
+    container.appendChild(this.renderer.domElement);
+
+    this.assets = new AnatomyAssetManager(this.renderer);
+    this.setupLighting();
+
+    this.bindEvents();
+    this.loadOrgan("heart");
+    this.startWave(1);
+    this.animate();
+  }
+
+  private setupLighting() {
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    const dirLight = new THREE.DirectionalLight(0xff3366, 2.5);
+    dirLight.position.set(5, 10, 7);
+    this.scene.add(dirLight);
+
+    const rimLight = new THREE.DirectionalLight(0x3388ff, 2.0);
+    rimLight.position.set(-5, -5, -5);
+    this.scene.add(rimLight);
+
+    // Dynamic player light
+    const playerLight = new THREE.PointLight(0x38bdf8, 1.5, 15);
+    playerLight.name = "playerLight";
+    this.scene.add(playerLight);
+  }
+
+  public bindEvents() {
+    const canvas = this.renderer.domElement;
+
+    canvas.addEventListener("click", () => {
+      if (!this.isPointerLocked && !this.isGameOver) {
+        canvas.requestPointerLock();
+      }
+    });
+
+    document.addEventListener("pointerlockchange", () => {
+      this.isPointerLocked = document.pointerLockElement === canvas;
+      this.emitState();
+    });
+
+    window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("keyup", this.onKeyUp);
+    window.addEventListener("mousemove", this.onMouseMove);
+    window.addEventListener("mousedown", this.onMouseDown);
+    window.addEventListener("mouseup", this.onMouseUp);
+    window.addEventListener("resize", this.onResize);
+  }
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    this.keysPressed[e.code] = true;
+    if (e.code === "Digit1") this.setWeapon("plasma");
+    if (e.code === "Digit2") this.setWeapon("shotgun");
+    if (e.code === "Digit3") this.setWeapon("annihilator");
+    if (e.code === "KeyR" && (this.isGameOver || this.isVictory)) {
+      this.restartGame();
+    }
+  };
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    this.keysPressed[e.code] = false;
+  };
+
+  private onMouseMove = (e: MouseEvent) => {
+    if (!this.isPointerLocked) return;
+    const sensitivity = 0.0022;
+    this.cameraYaw -= e.movementX * sensitivity;
+    this.cameraPitch -= e.movementY * sensitivity;
+
+    // Clamp pitch
+    this.cameraPitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.cameraPitch));
+  };
+
+  private onMouseDown = (e: MouseEvent) => {
+    if (e.button === 0) {
+      this.isMouseDown = true;
+      if (this.isPointerLocked) {
+        this.tryFireWeapon();
+      }
+    }
+  };
+
+  private onMouseUp = (e: MouseEvent) => {
+    if (e.button === 0) {
+      this.isMouseDown = false;
+    }
+  };
+
+  private onResize = () => {
+    if (!this.container) return;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h);
+  };
+
+  public async loadOrgan(organId: OrganId) {
+    this.currentOrganId = organId;
+    const organData = organById[organId];
+    if (!organData) return;
+
+    if (this.organ) {
+      this.scene.remove(this.organ.pivot);
+      this.assets.release(this.organ);
+      this.organ = null;
+    }
+
+    try {
+      this.organ = await this.assets.load(organData.model, () => {});
+      this.organ.pivot.position.set(0, 0, 0);
+      this.organ.pivot.scale.setScalar(1.8);
+      this.scene.add(this.organ.pivot);
+    } catch {
+      // Fallback mesh if model load fails
+      const geom = new THREE.SphereGeometry(1.8, 32, 32);
+      const mat = new THREE.MeshStandardMaterial({ color: organData.accent, roughness: 0.3 });
+      const mesh = new THREE.Mesh(geom, mat);
+      const group = new THREE.Group();
+      group.add(mesh);
+      this.organ = { pivot: group, meshes: [mesh], animations: [] };
+      this.scene.add(group);
+    }
+  }
+
+  public setWeapon(type: WeaponType) {
+    this.activeWeapon = type;
+    this.emitState();
+  }
+
+  public changeOrganLevel(organId: OrganId) {
+    this.loadOrgan(organId);
+    this.wave = 1;
+    this.organIntegrity = 100;
+    this.clearEnemiesAndBullets();
+    this.startWave(1);
+    this.emitState();
+  }
+
+  private clearEnemiesAndBullets() {
+    this.enemies.forEach((e) => this.scene.remove(e.mesh));
+    this.enemies = [];
+    this.bullets.forEach((b) => this.scene.remove(b.mesh));
+    this.bullets = [];
+    this.particles.forEach((p) => this.scene.remove(p.mesh));
+    this.particles = [];
+  }
+
+  public restartGame() {
+    this.health = 100;
+    this.armor = 50;
+    this.organIntegrity = 100;
+    this.score = 0;
+    this.kills = 0;
+    this.wave = 1;
+    this.isGameOver = false;
+    this.isVictory = false;
+    this.ammo = { plasma: 150, shotgun: 30, annihilator: 10 };
+    this.playerPos.set(0, 0, 7);
+    this.clearEnemiesAndBullets();
+    this.startWave(1);
+    this.emitState();
+  }
+
+  private startWave(waveNum: number) {
+    this.wave = waveNum;
+    this.totalWaveEnemies = 6 + waveNum * 4;
+    this.spawnWaveEnemies();
+  }
+
+  private spawnWaveEnemies() {
+    const numEnemies = this.totalWaveEnemies;
+    for (let i = 0; i < numEnemies; i++) {
+      let type: EnemyType = "virus";
+      const rand = Math.random();
+      if (rand < 0.5) {
+        type = "virus";
+      } else if (rand < 0.82) {
+        type = "bacteria";
+      } else {
+        type = "necromancer";
+      }
+
+      this.spawnEnemy(type);
+    }
+  }
+
+  private spawnEnemy(type: EnemyType, spawnPos?: THREE.Vector3) {
+    const group = new THREE.Group();
+
+    let color = 0x22c55e;
+    let size = 0.35;
+    let hp = 40;
+    let speed = 2.8;
+    let damage = 10;
+
+    if (type === "virus") {
+      // Virus: Spiky Icosahedron
+      color = 0xef4444; // Red spike virus
+      size = 0.35;
+      hp = 45;
+      speed = 3.2;
+      damage = 8;
+
+      const geom = new THREE.IcosahedronGeometry(size, 1);
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0.8, emissive: 0x990000, emissiveIntensity: 0.4 });
+      const core = new THREE.Mesh(geom, mat);
+      group.add(core);
+
+      // Add spikes
+      for (let s = 0; s < 12; s++) {
+        const spikeGeom = new THREE.ConeGeometry(0.08, 0.4, 4);
+        const spikeMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+        const spike = new THREE.Mesh(spikeGeom, spikeMat);
+        const dir = new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
+        spike.position.copy(dir.clone().multiplyScalar(size));
+        spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        group.add(spike);
+      }
+    } else if (type === "bacteria") {
+      // Bacteria: Capsule/Rod shape
+      color = 0xeab308; // Yellow toxic rod
+      size = 0.55;
+      hp = 120;
+      speed = 1.6;
+      damage = 18;
+
+      const geom = new THREE.CapsuleGeometry(size * 0.6, size * 1.2, 8, 16);
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: 0x665500, emissiveIntensity: 0.3 });
+      const mesh = new THREE.Mesh(geom, mat);
+      group.add(mesh);
+
+      // Toxic glow light
+      const light = new THREE.PointLight(0xeab308, 1, 3);
+      group.add(light);
+    } else if (type === "necromancer") {
+      // Infected Leukocyte Necromancer
+      color = 0xa855f7; // Corrupted Purple Leukocyte
+      size = 0.85;
+      hp = 280;
+      speed = 1.2;
+      damage = 25;
+
+      const geom = new THREE.DodecahedronGeometry(size, 2);
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.1, wireframe: false, emissive: 0x581c87, emissiveIntensity: 0.6 });
+      const mesh = new THREE.Mesh(geom, mat);
+      group.add(mesh);
+
+      // Dark aura sphere
+      const auraGeom = new THREE.SphereGeometry(size * 1.3, 16, 16);
+      const auraMat = new THREE.MeshBasicMaterial({ color: 0xc084fc, wireframe: true, transparent: true, opacity: 0.3 });
+      const aura = new THREE.Mesh(auraGeom, auraMat);
+      group.add(aura);
+
+      const light = new THREE.PointLight(0xa855f7, 2, 5);
+      group.add(light);
+    }
+
+    // Spawn position: random point around player
+    let pos = spawnPos;
+    if (!pos) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 6 + Math.random() * 8;
+      const height = (Math.random() - 0.5) * 4;
+      pos = new THREE.Vector3(this.playerPos.x + Math.cos(angle) * dist, height, this.playerPos.z + Math.sin(angle) * dist);
+    }
+
+    group.position.copy(pos);
+    this.scene.add(group);
+
+    const enemy: Enemy = {
+      id: Math.random().toString(36).substring(2, 9),
+      type,
+      mesh: group,
+      hp,
+      maxHp: hp,
+      speed,
+      damage,
+      radius: size,
+      lastAttackTime: 0,
+      attackCooldown: 1.0,
+      shootCooldown: type === "bacteria" ? 2.5 : type === "necromancer" ? 3.5 : 999,
+      lastShootTime: performance.now(),
+      position: group.position,
+      velocity: new THREE.Vector3(),
+    };
+
+    this.enemies.push(enemy);
+  }
+
+  private tryFireWeapon() {
+    const now = performance.now() / 1000;
+    const info = WEAPONS[this.activeWeapon];
+
+    if (now - this.lastFireTime < info.fireRate) return;
+    if (this.ammo[this.activeWeapon] < info.ammoPerShot) {
+      return; // Out of ammo
+    }
+
+    this.ammo[this.activeWeapon] -= info.ammoPerShot;
+    this.lastFireTime = now;
+
+    // Play weapon SFX
+    if (this.activeWeapon === "plasma") this.synth.play("shoot_plasma");
+    else if (this.activeWeapon === "shotgun") this.synth.play("shoot_shotgun");
+    else if (this.activeWeapon === "annihilator") this.synth.play("shoot_annihilator");
+
+    // Spawn Bullets
+    const shootDir = new THREE.Vector3(0, 0, -1);
+    const rotationMatrix = new THREE.Matrix4();
+    rotationMatrix.makeRotationFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
+    shootDir.applyMatrix4(rotationMatrix).normalize();
+
+    const muzzlePos = this.playerPos.clone().add(shootDir.clone().multiplyScalar(0.4));
+
+    if (this.activeWeapon === "plasma") {
+      this.createBullet(muzzlePos, shootDir, 28, info.damage, 0.12, false, info.color, "plasma");
+    } else if (this.activeWeapon === "shotgun") {
+      // Shotgun pellet spread (8 pellets)
+      for (let i = 0; i < 8; i++) {
+        const spreadDir = shootDir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
+        this.createBullet(muzzlePos, spreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
+      }
+    } else if (this.activeWeapon === "annihilator") {
+      this.createBullet(muzzlePos, shootDir, 18, info.damage, 0.35, false, info.color, "annihilator");
+    }
+
+    this.createMuzzleFlash(muzzlePos, info.color);
+    this.emitState();
+  }
+
+  private createBullet(pos: THREE.Vector3, dir: THREE.Vector3, speed: number, damage: number, radius: number, isEnemy: boolean, colorStr: string, weaponType?: WeaponType) {
+    const geom = new THREE.SphereGeometry(radius, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: colorStr });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+
+    this.bullets.push({
+      mesh,
+      position: mesh.position,
+      velocity: dir.clone().multiplyScalar(speed),
+      life: 2.2,
+      damage,
+      radius,
+      isEnemy,
+      color: colorStr,
+      weaponType,
+    });
+  }
+
+  private createMuzzleFlash(pos: THREE.Vector3, colorStr: string) {
+    const geom = new THREE.SphereGeometry(0.2, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: colorStr, transparent: true, opacity: 0.9 });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+
+    this.particles.push({
+      mesh,
+      velocity: new THREE.Vector3(),
+      life: 0.05,
+      maxLife: 0.05,
+      scaleSpeed: -3.0,
+    });
+  }
+
+  private createExplosion(pos: THREE.Vector3, colorStr: string, count = 16) {
+    for (let i = 0; i < count; i++) {
+      const geom = new THREE.SphereGeometry(0.06 + Math.random() * 0.08, 6, 6);
+      const mat = new THREE.MeshBasicMaterial({ color: colorStr });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.copy(pos);
+      this.scene.add(mesh);
+
+      const vel = new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6);
+
+      this.particles.push({
+        mesh,
+        velocity: vel,
+        life: 0.4 + Math.random() * 0.3,
+        maxLife: 0.7,
+        scaleSpeed: -1.2,
+      });
+    }
+  }
+
+  // Core Game Loop
+  private animate = () => {
+    this.animFrameId = requestAnimationFrame(this.animate);
+    const delta = Math.min(this.clock.getDelta(), 0.08);
+
+    if (!this.isGameOver) {
+      this.updatePlayerMovement(delta);
+      if (this.isMouseDown && this.isPointerLocked) {
+        this.tryFireWeapon();
+      }
+      this.updateEnemies(delta);
+      this.updateBullets(delta);
+      this.updateParticles(delta);
+
+      // Rotate Organ slowly
+      if (this.organ) {
+        this.organ.pivot.rotation.y += delta * 0.2;
+      }
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  private updatePlayerMovement(delta: number) {
+    if (!this.isPointerLocked) return;
+
+    const speed = 6.5;
+    const moveDir = new THREE.Vector3();
+
+    if (this.keysPressed["KeyW"]) moveDir.z -= 1;
+    if (this.keysPressed["KeyS"]) moveDir.z += 1;
+    if (this.keysPressed["KeyA"]) moveDir.x -= 1;
+    if (this.keysPressed["KeyD"]) moveDir.x += 1;
+    if (this.keysPressed["Space"]) moveDir.y += 0.8;
+    if (this.keysPressed["ShiftLeft"]) moveDir.y -= 0.8;
+
+    moveDir.normalize();
+
+    // Rotate moveDir according to camera yaw
+    const rotationMatrix = new THREE.Matrix4();
+    rotationMatrix.makeRotationY(this.cameraYaw);
+    moveDir.applyMatrix4(rotationMatrix);
+
+    this.playerVel.copy(moveDir.multiplyScalar(speed * delta));
+    this.playerPos.add(this.playerVel);
+
+    // Keep player within arena bounds
+    this.playerPos.x = THREE.MathUtils.clamp(this.playerPos.x, -14, 14);
+    this.playerPos.y = THREE.MathUtils.clamp(this.playerPos.y, -6, 8);
+    this.playerPos.z = THREE.MathUtils.clamp(this.playerPos.z, -14, 14);
+
+    // Update Camera Transform
+    this.camera.position.copy(this.playerPos);
+    this.camera.quaternion.setFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
+
+    // Update Player Dynamic Light
+    const playerLight = this.scene.getObjectByName("playerLight") as THREE.PointLight;
+    if (playerLight) playerLight.position.copy(this.playerPos);
+  }
+
+  private updateEnemies(delta: number) {
+    const now = performance.now();
+
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+
+      // Move enemy towards player or organ
+      const targetPos = this.playerPos;
+      const dir = targetPos.clone().sub(e.position).normalize();
+
+      e.position.add(dir.multiplyScalar(e.speed * delta));
+      e.mesh.position.copy(e.position);
+      e.mesh.rotation.y += delta * 1.5;
+
+      const distToPlayer = e.position.distanceTo(this.playerPos);
+
+      // Melee attack
+      if (distToPlayer < e.radius + 0.6) {
+        if (now - e.lastAttackTime > e.attackCooldown * 1000) {
+          this.damagePlayer(e.damage);
+          e.lastAttackTime = now;
+        }
+      }
+
+      // Ranged attacks for Bacteria & Necromancer
+      if (e.type === "bacteria" && distToPlayer < 12) {
+        if (now - e.lastShootTime > e.shootCooldown * 1000) {
+          e.lastShootTime = now;
+          const shootDir = this.playerPos.clone().sub(e.position).normalize();
+          this.createBullet(e.position.clone(), shootDir, 10, 12, 0.2, true, "#eab308");
+        }
+      } else if (e.type === "necromancer") {
+        if (now - e.lastShootTime > e.shootCooldown * 1000) {
+          e.lastShootTime = now;
+          // Necromancer summons a minion virus and shoots a purple orb
+          this.synth.play("necromancer_summon");
+          if (this.enemies.length < 20) {
+            this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+          }
+          const shootDir = this.playerPos.clone().sub(e.position).normalize();
+          this.createBullet(e.position.clone(), shootDir, 12, 20, 0.3, true, "#a855f7");
+        }
+      }
+
+      // Organ Damage: Enemies close to center slowly damage organ
+      if (e.position.length() < 2.5) {
+        this.organIntegrity = Math.max(0, this.organIntegrity - delta * 1.5);
+        if (this.organIntegrity <= 0 && !this.isGameOver) {
+          this.triggerGameOver(false);
+        }
+      }
+    }
+  }
+
+  private updateBullets(delta: number) {
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      b.position.add(b.velocity.clone().multiplyScalar(delta));
+      b.mesh.position.copy(b.position);
+      b.life -= delta;
+
+      if (b.life <= 0) {
+        this.scene.remove(b.mesh);
+        this.bullets.splice(i, 1);
+        continue;
+      }
+
+      if (b.isEnemy) {
+        // Enemy bullet hitting player
+        if (b.position.distanceTo(this.playerPos) < b.radius + 0.5) {
+          this.damagePlayer(b.damage);
+          this.createExplosion(b.position, b.color, 6);
+          this.scene.remove(b.mesh);
+          this.bullets.splice(i, 1);
+          continue;
+        }
+      } else {
+        // Player bullet hitting enemies
+        let hitEnemy = false;
+        for (let j = this.enemies.length - 1; j >= 0; j--) {
+          const e = this.enemies[j];
+          if (b.position.distanceTo(e.position) < b.radius + e.radius) {
+            e.hp -= b.damage;
+            this.synth.play("hit");
+            this.createExplosion(b.position, b.color, b.weaponType === "annihilator" ? 24 : 8);
+
+            // Annihilator Splash Damage
+            if (b.weaponType === "annihilator") {
+              this.enemies.forEach((otherE) => {
+                if (otherE.position.distanceTo(b.position) < 4.0) {
+                  otherE.hp -= 100;
+                }
+              });
+            }
+
+            hitEnemy = true;
+
+            // Check Enemy Death
+            if (e.hp <= 0) {
+              this.synth.play("kill");
+              this.createExplosion(e.position, "#ff0055", 20);
+              this.scene.remove(e.mesh);
+              this.enemies.splice(j, 1);
+
+              this.score += e.type === "virus" ? 100 : e.type === "bacteria" ? 250 : 600;
+              this.kills++;
+
+              // Chance to drop ammo or armor
+              if (Math.random() < 0.3) {
+                this.ammo[this.activeWeapon] = Math.min(
+                  WEAPONS[this.activeWeapon].maxAmmo,
+                  this.ammo[this.activeWeapon] + (this.activeWeapon === "plasma" ? 30 : this.activeWeapon === "shotgun" ? 8 : 3)
+                );
+              }
+            }
+            break;
+          }
+        }
+
+        if (hitEnemy) {
+          this.scene.remove(b.mesh);
+          this.bullets.splice(i, 1);
+          this.checkWaveProgress();
+          continue;
+        }
+      }
+    }
+  }
+
+  private checkWaveProgress() {
+    if (this.enemies.length === 0 && !this.isGameOver) {
+      if (this.wave < 5) {
+        this.startWave(this.wave + 1);
+      } else {
+        this.triggerGameOver(true);
+      }
+    }
+    this.emitState();
+  }
+
+  private damagePlayer(amount: number) {
+    if (this.isGameOver) return;
+
+    this.synth.play("player_hurt");
+    this.hurtFlashTimer = 0.3;
+
+    if (this.armor > 0) {
+      const armorAbsorb = Math.min(this.armor, amount * 0.6);
+      this.armor -= armorAbsorb;
+      amount -= armorAbsorb;
+    }
+
+    this.health -= amount;
+
+    if (this.health <= 0) {
+      this.health = 0;
+      this.triggerGameOver(false);
+    }
+
+    this.emitState();
+  }
+
+  private triggerGameOver(victory: boolean) {
+    this.isGameOver = true;
+    this.isVictory = victory;
+    if (document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    this.emitState();
+  }
+
+  private updateParticles(delta: number) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.position = p.mesh.position;
+      p.position.add(p.velocity.clone().multiplyScalar(delta));
+      p.life -= delta;
+
+      if (p.scaleSpeed) {
+        const currentScale = p.mesh.scale.x;
+        const newScale = Math.max(0.01, currentScale + p.scaleSpeed * delta);
+        p.mesh.scale.setScalar(newScale);
+      }
+
+      if (p.life <= 0) {
+        this.scene.remove(p.mesh);
+        this.particles.splice(i, 1);
+      }
+    }
+  }
+
+  private emitState() {
+    let expression: GameState["faceExpression"] = "normal";
+    if (this.health <= 0) expression = "dead";
+    else if (this.health < 30) expression = "critical";
+    else if (this.hurtFlashTimer > 0) expression = "hurt";
+    else if (this.isMouseDown) expression = "firing";
+
+    this.callbacks.onStateUpdate({
+      health: Math.round(this.health),
+      maxHealth: 100,
+      armor: Math.round(this.armor),
+      maxArmor: 100,
+      ammo: { ...this.ammo },
+      activeWeapon: this.activeWeapon,
+      organIntegrity: Math.round(this.organIntegrity),
+      score: this.score,
+      kills: this.kills,
+      wave: this.wave,
+      organId: this.currentOrganId,
+      isGameOver: this.isGameOver,
+      isVictory: this.isVictory,
+      enemiesRemaining: this.enemies.length,
+      isPointerLocked: this.isPointerLocked,
+      isFiring: this.isMouseDown,
+      faceExpression: expression,
+    });
+  }
+
+  public dispose() {
+    cancelAnimationFrame(this.animFrameId);
+    window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("keyup", this.onKeyUp);
+    window.removeEventListener("mousemove", this.onMouseMove);
+    window.removeEventListener("mousedown", this.onMouseDown);
+    window.removeEventListener("mouseup", this.onMouseUp);
+    window.removeEventListener("resize", this.onResize);
+
+    this.clearEnemiesAndBullets();
+    this.assets.dispose();
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
+  }
+}
