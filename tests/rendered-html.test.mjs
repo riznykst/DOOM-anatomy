@@ -22,16 +22,16 @@ async function render() {
   );
 }
 
-test("server-renders DOOM Bio-Defender starter page", async () => {
+test("server-renders Nanobot Bio-Defender starter page", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /DOOM/);
+  assert.match(html, /NANOBOT/);
   assert.match(html, /BIO-DEFENDER 3D/);
-  assert.match(html, /System Infection Lockdown/);
-  assert.match(html, /SELECT SYSTEM/);
+  assert.match(html, /Кровеносная система/);
+  assert.match(html, /ЛОКАЦИЯ/);
   assert.match(html, /Heart/);
   assert.match(html, /ORGAN INTEGRITY/);
 });

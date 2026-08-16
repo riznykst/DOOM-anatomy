@@ -257,11 +257,11 @@ export function DoomBioShooter() {
       {/* Top Banner / Organ Selection Bar */}
       <header className="doom-header">
         <div className="doom-brand">
-          <span className="doom-logo-badge">DOOM</span>
+          <span className="doom-logo-badge">NANOBOT</span>
           <strong>BIO-DEFENDER 3D</strong>
-          <small>System Infection Lockdown</small>
+          <small>Кровеносная система & Межклеточная жидкость</small>
           <small className="mode-badge">
-            {gameState.gameMode === "onboarding" ? "🎓 ОБУЧЕНИЕ" : `⚔️ РЕАЛЬНАЯ ИГРА (${DIFFICULTY_SETTINGS[gameState.difficulty].name})`}
+            {gameState.gameMode === "onboarding" ? "🎓 ОБУЧЕНИЕ НАНОБОТА" : `⚔️ БОЕВОЙ РЕЖИМ (${DIFFICULTY_SETTINGS[gameState.difficulty].name})`}
           </small>
         </div>
 
@@ -281,7 +281,7 @@ export function DoomBioShooter() {
             {gameState.gameMode === "onboarding" ? "⚔️ Играть в реальном режиме" : "🎓 Перейти к Обучению"}
           </button>
 
-          <span className="selector-label">SELECT SYSTEM / ОРГАН:</span>
+          <span className="selector-label">ЛОКАЦИЯ (АРТЕРИИ, ВЕНЫ, КАПИЛЛЯРЫ):</span>
           <div className="organ-pills">
             {organs.map((org) => (
               <button
@@ -396,43 +396,43 @@ export function DoomBioShooter() {
             <div className="onboarding-hud-header">
               <span className="onboarding-step-badge">ШАГ {gameState.onboardingStep} ИЗ 5</span>
               <strong>
-                {gameState.onboardingStep === 1 && "Управление & Движение 3D"}
-                {gameState.onboardingStep === 2 && "Тренировка стрельбы & Оружие"}
-                {gameState.onboardingStep === 3 && "Обзор врагов & Уязвимости"}
-                {gameState.onboardingStep === 4 && "Защита органов & Броня"}
-                {gameState.onboardingStep === 5 && "Финал обучения - Готов к бою!"}
+                {gameState.onboardingStep === 1 && "Нанобот: Навигация в сосудах"}
+                {gameState.onboardingStep === 2 && "Стрельба & Вооружение нанобота"}
+                {gameState.onboardingStep === 3 && "Анализ вирусов и бактерий"}
+                {gameState.onboardingStep === 4 && "Защитная оболочка & Целостность тканей"}
+                {gameState.onboardingStep === 5 && "Нанобот готов к зачистке!"}
               </strong>
             </div>
 
             <div className="onboarding-hud-body">
               {gameState.onboardingStep === 1 && (
-                <p>Двигайтесь с помощью <strong>WASD</strong>. <strong>Space</strong> — вверх, <strong>Shift</strong> — вниз. В режиме онбординга вас <strong>не могут убить</strong>!</p>
+                <p>Вы — <strong>микроскопический Нанобот</strong> от первого лица. Маневрируйте по артериям и капиллярам с помощью <strong>WASD</strong>, <strong>Space</strong> (вверх) и <strong>Shift</strong> (вниз). В режиме обучения вы <strong>бессмертны</strong>!</p>
               )}
               {gameState.onboardingStep === 2 && (
                 <div>
-                  <p>Зажмите <strong>ЛКМ</strong> для стрельбы. Патроны <strong>бесконечные</strong>! Уничтожено мишеней: <strong>{gameState.dummiesDestroyed}</strong></p>
+                  <p>Зажмите <strong>ЛКМ</strong> для ликвидации угроз. Заряд <strong>бесконечный</strong>! Уничтожено тренировочных целей: <strong>{gameState.dummiesDestroyed}</strong></p>
                   <div className="step-weapon-tips">
-                    <span><strong>1</strong> PLASMA (Быстрый огонь)</span>
-                    <span><strong>2</strong> SHOTGUN (Спрей)</span>
-                    <span><strong>3</strong> ANNIHILATOR (Ракеты)</span>
+                    <span><strong>1</strong> PLASMA (Плазменный антиген)</span>
+                    <span><strong>2</strong> SHOTGUN (Био-дробовик)</span>
+                    <span><strong>3</strong> ANNIHILATOR (Нано-аннигилятор)</span>
                   </div>
                 </div>
               )}
               {gameState.onboardingStep === 3 && (
                 <div>
-                  <p>Впереди пассивные образцы врагов:</p>
+                  <p>Впереди патогенные вирусы и бактерии в межклеточной жидкости (HP снижено на 50%):</p>
                   <div className="enemy-types-preview">
-                    <span>🔴 <strong>Вирус</strong> (быстрый, малый HP)</span>
-                    <span>🟡 <strong>Бактерия</strong> (прочная, стреляет)</span>
-                    <span>🟣 <strong>Некромант</strong> (высокий HP, аура)</span>
+                    <span>🔴 <strong>Вирус</strong> (быстрый, 22.5 HP)</span>
+                    <span>🟡 <strong>Бактерия</strong> (стреляющая, 60 HP)</span>
+                    <span>🟣 <strong>Некромант</strong> (опасный штамм, 140 HP)</span>
                   </div>
                 </div>
               )}
               {gameState.onboardingStep === 4 && (
-                <p>Броня (BIO-ARMOR) поглощает 60% урона. Индикатор INTEGRITY показывает состояние органа — не дайте вирусам разрушить его!</p>
+                <p>Броня Нанобота поглощает 60% урона. Индикатор INTEGRITY показывает целостность органа — защитите сосуды и ткани от вирусов!</p>
               )}
               {gameState.onboardingStep === 5 && (
-                <p>Отлично! Вы освоили стрельбу, движение и изучили врагов. Вы готовы к настоящей игре!</p>
+                <p>Отлично! Нанобот полностью настроен. Запустите протокол зачистки артерий, вен и межклеточных жидкостей!</p>
               )}
             </div>
 
@@ -480,9 +480,9 @@ export function DoomBioShooter() {
         {!isGameStarted && !gameState.isGameOver && (
           <div className="doom-start-overlay">
             <div className="start-modal mode-modal">
-              <h2>DOOM: BIO-DEFENDER 3D</h2>
+              <h2>NANOBOT: BIO-DEFENDER 3D</h2>
               <p className="subtext">
-                Орган назначения: <strong>{currentOrgan.name.toUpperCase()}</strong> ({currentOrgan.system})
+                Вы — Нанобот от первого лица. Локация: <strong>{currentOrgan.name.toUpperCase()}</strong> (Артерии, вены, сосуды, капилляры и межклеточная жидкость)
               </p>
 
               {/* Mode Selection Tabs */}
@@ -506,15 +506,15 @@ export function DoomBioShooter() {
               {selectedModeTab === "onboarding" ? (
                 <div className="mode-tab-content">
                   <div className="onboarding-feature-list">
-                    <div className="feat-item"><Shield size={16} className="text-emerald-400" /> <span><strong>Бессмертие:</strong> Вас не могут убить (тренировка без риска)</span></div>
-                    <div className="feat-item"><Target size={16} className="text-sky-400" /> <span><strong>Тренировка стрельбы:</strong> Мишени и бесконечные патроны</span></div>
-                    <div className="feat-item"><Skull size={16} className="text-purple-400" /> <span><strong>Обзор врагов & оружия:</strong> Все 3 типа врагов и 3 вида оружия</span></div>
+                    <div className="feat-item"><Shield size={16} className="text-emerald-400" /> <span><strong>Миссия Нанобота:</strong> Путешествуйте по артериям, венам, капиллярам и межклеточным жидкостям</span></div>
+                    <div className="feat-item"><Target size={16} className="text-sky-400" /> <span><strong>Ослабленные вирусы:</strong> HP всех патогенов снижено на 50%!</span></div>
+                    <div className="feat-item"><Skull size={16} className="text-purple-400" /> <span><strong>Тренировочный режим:</strong> Бессмертие и бесконечные заряды орудий</span></div>
                   </div>
 
                   <div className="controls-guide">
-                    <div><span>WASD / Space / Shift</span> Движение в 3D</div>
+                    <div><span>WASD / Space / Shift</span> Навигация нанобота в 3D</div>
                     <div><span>Мышь + ЛКМ</span> Прицеливание и стрельба</div>
-                    <div><span>Клавиши 1, 2, 3</span> Переключение оружия</div>
+                    <div><span>Клавиши 1, 2, 3</span> Переключение нано-оружия</div>
                   </div>
 
                   <button className="start-btn onboarding-start-btn" onClick={() => startMode("onboarding")}>
