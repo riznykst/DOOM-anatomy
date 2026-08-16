@@ -1,5 +1,5 @@
-import { AnatomyApp } from "./components/AnatomyApp";
+import { DoomBioShooter } from "./components/DoomBioShooter";
 
 export default function Home() {
-  return <AnatomyApp />;
+  return <DoomBioShooter />;
 }
