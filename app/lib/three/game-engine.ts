@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { organById, organs, type Organ, type OrganId } from "../anatomy-data";
+import { organById, type OrganId } from "../anatomy-data";
 import { AnatomyAssetManager, type LoadedOrgan } from "./loaders";
 
 export type WeaponType = "plasma" | "shotgun" | "annihilator";
@@ -91,6 +91,53 @@ export interface Particle {
   scaleSpeed: number;
 }
 
+export type GameMode = "onboarding" | "real";
+export type Difficulty = "easy" | "medium" | "hard";
+
+export interface TargetDummy {
+  id: string;
+  mesh: THREE.Group;
+  hp: number;
+  maxHp: number;
+  position: THREE.Vector3;
+  radius: number;
+  isHit: boolean;
+}
+
+export const DIFFICULTY_SETTINGS: Record<Difficulty, {
+  name: string;
+  hpMult: number;
+  dmgMult: number;
+  speedMult: number;
+  organDecayMult: number;
+  enemyCountMult: number;
+}> = {
+  easy: {
+    name: "Легкий (Easy)",
+    hpMult: 0.6,
+    dmgMult: 0.5,
+    speedMult: 0.8,
+    organDecayMult: 0.5,
+    enemyCountMult: 0.75,
+  },
+  medium: {
+    name: "Средний (Medium)",
+    hpMult: 1.0,
+    dmgMult: 1.0,
+    speedMult: 1.0,
+    organDecayMult: 1.0,
+    enemyCountMult: 1.0,
+  },
+  hard: {
+    name: "Сложный (Hard)",
+    hpMult: 1.4,
+    dmgMult: 1.5,
+    speedMult: 1.25,
+    organDecayMult: 1.5,
+    enemyCountMult: 1.3,
+  },
+};
+
 export type GameState = {
   health: number;
   maxHealth: number;
@@ -109,6 +156,10 @@ export type GameState = {
   isPointerLocked: boolean;
   isFiring: boolean;
   faceExpression: "normal" | "firing" | "hurt" | "critical" | "dead";
+  gameMode: GameMode;
+  difficulty: Difficulty;
+  onboardingStep: number;
+  dummiesDestroyed: number;
 };
 
 type GameCallbacks = {
@@ -245,6 +296,7 @@ export class DoomGameEngine {
 
   // Game Objects
   private enemies: Enemy[] = [];
+  private targetDummies: TargetDummy[] = [];
   private bullets: Bullet[] = [];
   private particles: Particle[] = [];
 
@@ -252,13 +304,19 @@ export class DoomGameEngine {
   private activeWeapon: WeaponType = "plasma";
   private lastFireTime = 0;
 
+  // Mode & Difficulty State
+  private gameMode: GameMode = "onboarding";
+  private difficulty: Difficulty = "medium";
+  private onboardingStep = 1;
+  private dummiesDestroyed = 0;
+
   // Game Stats
   private health = 100;
-  private armor = 50;
+  private armor = 100;
   private ammo: Record<WeaponType, number> = {
-    plasma: 150,
-    shotgun: 30,
-    annihilator: 10,
+    plasma: 300,
+    shotgun: 60,
+    annihilator: 30,
   };
   private organIntegrity = 100;
   private score = 0;
@@ -296,8 +354,122 @@ export class DoomGameEngine {
 
     this.bindEvents();
     this.loadOrgan("heart");
-    this.startWave(1);
+    this.initMode("onboarding");
     this.animate();
+  }
+
+  public initMode(mode: GameMode, difficulty: Difficulty = "medium") {
+    this.gameMode = mode;
+    this.difficulty = difficulty;
+    this.isGameOver = false;
+    this.isVictory = false;
+
+    if (mode === "onboarding") {
+      this.health = 100;
+      this.armor = 100;
+      this.organIntegrity = 100;
+      this.onboardingStep = 1;
+      this.dummiesDestroyed = 0;
+      this.clearEnemiesAndBullets();
+      this.setupOnboardingStep(1);
+    } else {
+      this.health = 100;
+      this.armor = 50;
+      this.organIntegrity = 100;
+      this.score = 0;
+      this.kills = 0;
+      this.wave = 1;
+      this.ammo = { plasma: 150, shotgun: 30, annihilator: 10 };
+      this.playerPos.set(0, 0, 7);
+      this.clearEnemiesAndBullets();
+      this.startWave(1);
+    }
+    this.emitState();
+  }
+
+  public setDifficulty(difficulty: Difficulty) {
+    this.difficulty = difficulty;
+    if (this.gameMode === "real") {
+      this.restartGame();
+    } else {
+      this.emitState();
+    }
+  }
+
+  public setOnboardingStep(step: number) {
+    this.onboardingStep = step;
+    this.setupOnboardingStep(step);
+    this.emitState();
+  }
+
+  private setupOnboardingStep(step: number) {
+    this.clearEnemiesAndBullets();
+    this.health = 100;
+    this.armor = 100;
+    this.organIntegrity = 100;
+    this.ammo = { plasma: 300, shotgun: 60, annihilator: 30 };
+
+    if (step === 1) {
+      // Step 1: Controls & 3D Movement
+      // Clear targets/enemies, spawn 1 stationary guide target in distance
+      this.spawnTargetDummy(new THREE.Vector3(0, 0, -2));
+    } else if (step === 2) {
+      // Step 2: Target Practice (3 Shooting Dummies)
+      this.spawnTargetDummy(new THREE.Vector3(-3, 0.5, 0));
+      this.spawnTargetDummy(new THREE.Vector3(0, 1, -2));
+      this.spawnTargetDummy(new THREE.Vector3(3, 0.5, 0));
+    } else if (step === 3) {
+      // Step 3: Enemy Overview Showcase (1 Virus, 1 Bacteria, 1 Necromancer in safe positions)
+      this.spawnEnemy("virus", new THREE.Vector3(-4, 0, 1), true);
+      this.spawnEnemy("bacteria", new THREE.Vector3(0, 0, -1), true);
+      this.spawnEnemy("necromancer", new THREE.Vector3(4, 0, 1), true);
+    } else if (step === 4) {
+      // Step 4: Defense & Organ Integrity Showcase
+      this.spawnTargetDummy(new THREE.Vector3(-2, 0, 0));
+      this.spawnTargetDummy(new THREE.Vector3(2, 0, 0));
+      this.spawnEnemy("virus", new THREE.Vector3(-3, 0, 2), true);
+      this.spawnEnemy("bacteria", new THREE.Vector3(3, 0, 2), true);
+    } else if (step === 5) {
+      // Step 5: Final Practice Field
+      this.spawnTargetDummy(new THREE.Vector3(-3, 1, 0));
+      this.spawnTargetDummy(new THREE.Vector3(0, 1.5, -2));
+      this.spawnTargetDummy(new THREE.Vector3(3, 1, 0));
+      this.spawnEnemy("virus", new THREE.Vector3(-2, 0, 3), true);
+      this.spawnEnemy("bacteria", new THREE.Vector3(2, 0, 3), true);
+    }
+  }
+
+  private spawnTargetDummy(pos: THREE.Vector3) {
+    const group = new THREE.Group();
+
+    // Target outer ring
+    const ringGeom = new THREE.TorusGeometry(0.6, 0.08, 16, 32);
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.5 });
+    const ring = new THREE.Mesh(ringGeom, ringMat);
+    group.add(ring);
+
+    // Inner bullseye sphere
+    const innerGeom = new THREE.SphereGeometry(0.3, 16, 16);
+    const innerMat = new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x991b1b, emissiveIntensity: 0.6 });
+    const inner = new THREE.Mesh(innerGeom, innerMat);
+    group.add(inner);
+
+    // Glow point light
+    const light = new THREE.PointLight(0x38bdf8, 1, 3);
+    group.add(light);
+
+    group.position.copy(pos);
+    this.scene.add(group);
+
+    this.targetDummies.push({
+      id: Math.random().toString(36).substring(2, 9),
+      mesh: group,
+      hp: 100,
+      maxHp: 100,
+      position: group.position,
+      radius: 0.6,
+      isHit: false,
+    });
   }
 
   private setupLighting() {
@@ -432,6 +604,8 @@ export class DoomGameEngine {
   private clearEnemiesAndBullets() {
     this.enemies.forEach((e) => this.scene.remove(e.mesh));
     this.enemies = [];
+    this.targetDummies.forEach((d) => this.scene.remove(d.mesh));
+    this.targetDummies = [];
     this.bullets.forEach((b) => this.scene.remove(b.mesh));
     this.bullets = [];
     this.particles.forEach((p) => this.scene.remove(p.mesh));
@@ -439,6 +613,10 @@ export class DoomGameEngine {
   }
 
   public restartGame() {
+    if (this.gameMode === "onboarding") {
+      this.initMode("onboarding");
+      return;
+    }
     this.health = 100;
     this.armor = 50;
     this.organIntegrity = 100;
@@ -456,7 +634,8 @@ export class DoomGameEngine {
 
   private startWave(waveNum: number) {
     this.wave = waveNum;
-    this.totalWaveEnemies = 6 + waveNum * 4;
+    const diff = DIFFICULTY_SETTINGS[this.difficulty];
+    this.totalWaveEnemies = Math.round((6 + waveNum * 4) * diff.enemyCountMult);
     this.spawnWaveEnemies();
   }
 
@@ -477,8 +656,9 @@ export class DoomGameEngine {
     }
   }
 
-  private spawnEnemy(type: EnemyType, spawnPos?: THREE.Vector3) {
+  private spawnEnemy(type: EnemyType, spawnPos?: THREE.Vector3, isPassive: boolean = false) {
     const group = new THREE.Group();
+    const diff = DIFFICULTY_SETTINGS[this.difficulty];
 
     let color = 0x22c55e;
     let size = 0.35;
@@ -490,9 +670,9 @@ export class DoomGameEngine {
       // Virus: Spiky Icosahedron
       color = 0xef4444; // Red spike virus
       size = 0.35;
-      hp = 45;
-      speed = 3.2;
-      damage = 8;
+      hp = 45 * diff.hpMult;
+      speed = 3.2 * diff.speedMult;
+      damage = 8 * diff.dmgMult;
 
       const geom = new THREE.IcosahedronGeometry(size, 1);
       const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0.8, emissive: 0x990000, emissiveIntensity: 0.4 });
@@ -513,9 +693,9 @@ export class DoomGameEngine {
       // Bacteria: Capsule/Rod shape
       color = 0xeab308; // Yellow toxic rod
       size = 0.55;
-      hp = 120;
-      speed = 1.6;
-      damage = 18;
+      hp = 120 * diff.hpMult;
+      speed = 1.6 * diff.speedMult;
+      damage = 18 * diff.dmgMult;
 
       const geom = new THREE.CapsuleGeometry(size * 0.6, size * 1.2, 8, 16);
       const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, emissive: 0x665500, emissiveIntensity: 0.3 });
@@ -529,9 +709,9 @@ export class DoomGameEngine {
       // Infected Leukocyte Necromancer
       color = 0xa855f7; // Corrupted Purple Leukocyte
       size = 0.85;
-      hp = 280;
-      speed = 1.2;
-      damage = 25;
+      hp = 280 * diff.hpMult;
+      speed = 1.2 * diff.speedMult;
+      damage = 25 * diff.dmgMult;
 
       const geom = new THREE.DodecahedronGeometry(size, 2);
       const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.1, wireframe: false, emissive: 0x581c87, emissiveIntensity: 0.6 });
@@ -566,12 +746,12 @@ export class DoomGameEngine {
       mesh: group,
       hp,
       maxHp: hp,
-      speed,
-      damage,
+      speed: isPassive ? 0 : speed,
+      damage: isPassive ? 0 : damage,
       radius: size,
       lastAttackTime: 0,
       attackCooldown: 1.0,
-      shootCooldown: type === "bacteria" ? 2.5 : type === "necromancer" ? 3.5 : 999,
+      shootCooldown: isPassive ? 99999 : type === "bacteria" ? 2.5 : type === "necromancer" ? 3.5 : 999,
       lastShootTime: performance.now(),
       position: group.position,
       velocity: new THREE.Vector3(),
@@ -585,7 +765,11 @@ export class DoomGameEngine {
     const info = WEAPONS[this.activeWeapon];
 
     if (now - this.lastFireTime < info.fireRate) return;
-    if (this.ammo[this.activeWeapon] < info.ammoPerShot) {
+
+    if (this.gameMode === "onboarding") {
+      // Onboarding: Infinite / auto-replenishing ammo
+      this.ammo[this.activeWeapon] = info.maxAmmo;
+    } else if (this.ammo[this.activeWeapon] < info.ammoPerShot) {
       return; // Out of ammo
     }
 
@@ -740,52 +924,63 @@ export class DoomGameEngine {
   private updateEnemies(delta: number) {
     const now = performance.now();
 
+    // Rotate Target Dummies
+    for (let d = 0; d < this.targetDummies.length; d++) {
+      const dummy = this.targetDummies[d];
+      dummy.mesh.rotation.y += delta * 2.0;
+      dummy.mesh.position.y += Math.sin(now * 0.003 + d) * 0.003;
+    }
+
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
 
-      // Move enemy towards player or organ
-      const targetPos = this.playerPos;
-      const dir = targetPos.clone().sub(e.position).normalize();
+      if (e.speed > 0) {
+        // Move enemy towards player or organ
+        const targetPos = this.playerPos;
+        const dir = targetPos.clone().sub(e.position).normalize();
 
-      e.position.add(dir.multiplyScalar(e.speed * delta));
-      e.mesh.position.copy(e.position);
+        e.position.add(dir.multiplyScalar(e.speed * delta));
+        e.mesh.position.copy(e.position);
+      }
       e.mesh.rotation.y += delta * 1.5;
 
       const distToPlayer = e.position.distanceTo(this.playerPos);
 
-      // Melee attack
-      if (distToPlayer < e.radius + 0.6) {
-        if (now - e.lastAttackTime > e.attackCooldown * 1000) {
-          this.damagePlayer(e.damage);
-          e.lastAttackTime = now;
-        }
-      }
-
-      // Ranged attacks for Bacteria & Necromancer
-      if (e.type === "bacteria" && distToPlayer < 12) {
-        if (now - e.lastShootTime > e.shootCooldown * 1000) {
-          e.lastShootTime = now;
-          const shootDir = this.playerPos.clone().sub(e.position).normalize();
-          this.createBullet(e.position.clone(), shootDir, 10, 12, 0.2, true, "#eab308");
-        }
-      } else if (e.type === "necromancer") {
-        if (now - e.lastShootTime > e.shootCooldown * 1000) {
-          e.lastShootTime = now;
-          // Necromancer summons a minion virus and shoots a purple orb
-          this.synth.play("necromancer_summon");
-          if (this.enemies.length < 20) {
-            this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+      if (this.gameMode !== "onboarding") {
+        // Melee attack
+        if (distToPlayer < e.radius + 0.6) {
+          if (now - e.lastAttackTime > e.attackCooldown * 1000) {
+            this.damagePlayer(e.damage);
+            e.lastAttackTime = now;
           }
-          const shootDir = this.playerPos.clone().sub(e.position).normalize();
-          this.createBullet(e.position.clone(), shootDir, 12, 20, 0.3, true, "#a855f7");
         }
-      }
 
-      // Organ Damage: Enemies close to center slowly damage organ
-      if (e.position.length() < 2.5) {
-        this.organIntegrity = Math.max(0, this.organIntegrity - delta * 1.5);
-        if (this.organIntegrity <= 0 && !this.isGameOver) {
-          this.triggerGameOver(false);
+        // Ranged attacks for Bacteria & Necromancer
+        if (e.type === "bacteria" && distToPlayer < 12) {
+          if (now - e.lastShootTime > e.shootCooldown * 1000) {
+            e.lastShootTime = now;
+            const shootDir = this.playerPos.clone().sub(e.position).normalize();
+            this.createBullet(e.position.clone(), shootDir, 10, 12, 0.2, true, "#eab308");
+          }
+        } else if (e.type === "necromancer") {
+          if (now - e.lastShootTime > e.shootCooldown * 1000) {
+            e.lastShootTime = now;
+            this.synth.play("necromancer_summon");
+            if (this.enemies.length < 20) {
+              this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+            }
+            const shootDir = this.playerPos.clone().sub(e.position).normalize();
+            this.createBullet(e.position.clone(), shootDir, 12, 20, 0.3, true, "#a855f7");
+          }
+        }
+
+        // Organ Damage: Enemies close to center slowly damage organ
+        if (e.position.length() < 2.5) {
+          const decayMult = DIFFICULTY_SETTINGS[this.difficulty].organDecayMult;
+          this.organIntegrity = Math.max(0, this.organIntegrity - delta * 1.5 * decayMult);
+          if (this.organIntegrity <= 0 && !this.isGameOver) {
+            this.triggerGameOver(false);
+          }
         }
       }
     }
@@ -814,6 +1009,42 @@ export class DoomGameEngine {
           continue;
         }
       } else {
+        // Player bullet hitting target dummies
+        let hitDummy = false;
+        for (let d = this.targetDummies.length - 1; d >= 0; d--) {
+          const dummy = this.targetDummies[d];
+          if (b.position.distanceTo(dummy.position) < b.radius + dummy.radius) {
+            dummy.hp -= b.damage;
+            this.synth.play("hit");
+            this.createExplosion(b.position, "#38bdf8", 12);
+            hitDummy = true;
+
+            if (dummy.hp <= 0) {
+              this.synth.play("kill");
+              this.createExplosion(dummy.position, "#38bdf8", 24);
+              this.scene.remove(dummy.mesh);
+              this.targetDummies.splice(d, 1);
+              this.dummiesDestroyed++;
+              // Respawn dummy if in onboarding
+              if (this.gameMode === "onboarding") {
+                setTimeout(() => {
+                  if (this.gameMode === "onboarding") {
+                    this.spawnTargetDummy(dummy.position.clone());
+                  }
+                }, 1500);
+              }
+            }
+            break;
+          }
+        }
+
+        if (hitDummy) {
+          this.scene.remove(b.mesh);
+          this.bullets.splice(i, 1);
+          this.emitState();
+          continue;
+        }
+
         // Player bullet hitting enemies
         let hitEnemy = false;
         for (let j = this.enemies.length - 1; j >= 0; j--) {
@@ -844,12 +1075,23 @@ export class DoomGameEngine {
               this.score += e.type === "virus" ? 100 : e.type === "bacteria" ? 250 : 600;
               this.kills++;
 
-              // Chance to drop ammo or armor
-              if (Math.random() < 0.3) {
-                this.ammo[this.activeWeapon] = Math.min(
-                  WEAPONS[this.activeWeapon].maxAmmo,
-                  this.ammo[this.activeWeapon] + (this.activeWeapon === "plasma" ? 30 : this.activeWeapon === "shotgun" ? 8 : 3)
-                );
+              // Onboarding respawn passive showcase enemy
+              if (this.gameMode === "onboarding") {
+                const respawnType = e.type;
+                const respawnPos = e.position.clone();
+                setTimeout(() => {
+                  if (this.gameMode === "onboarding") {
+                    this.spawnEnemy(respawnType, respawnPos, true);
+                  }
+                }, 2000);
+              } else {
+                // Chance to drop ammo or armor
+                if (Math.random() < 0.3) {
+                  this.ammo[this.activeWeapon] = Math.min(
+                    WEAPONS[this.activeWeapon].maxAmmo,
+                    this.ammo[this.activeWeapon] + (this.activeWeapon === "plasma" ? 30 : this.activeWeapon === "shotgun" ? 8 : 3)
+                  );
+                }
               }
             }
             break;
@@ -859,7 +1101,11 @@ export class DoomGameEngine {
         if (hitEnemy) {
           this.scene.remove(b.mesh);
           this.bullets.splice(i, 1);
-          this.checkWaveProgress();
+          if (this.gameMode === "real") {
+            this.checkWaveProgress();
+          } else {
+            this.emitState();
+          }
           continue;
         }
       }
@@ -879,6 +1125,14 @@ export class DoomGameEngine {
 
   private damagePlayer(amount: number) {
     if (this.isGameOver) return;
+
+    // In onboarding mode, player cannot die ("где не убивают")
+    if (this.gameMode === "onboarding") {
+      this.health = 100;
+      this.armor = 100;
+      this.emitState();
+      return;
+    }
 
     this.synth.play("player_hurt");
     this.hurtFlashTimer = 0.3;
@@ -952,6 +1206,10 @@ export class DoomGameEngine {
       isPointerLocked: this.isPointerLocked,
       isFiring: this.isMouseDown,
       faceExpression: expression,
+      gameMode: this.gameMode,
+      difficulty: this.difficulty,
+      onboardingStep: this.onboardingStep,
+      dummiesDestroyed: this.dummiesDestroyed,
     });
   }
 

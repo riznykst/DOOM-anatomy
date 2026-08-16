@@ -3,17 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Crosshair,
   Heart,
+  Play,
   RotateCcw,
   Shield,
   Skull,
+  Target,
   Zap,
 } from "lucide-react";
 import { organById, organs, type OrganId } from "../lib/anatomy-data";
 import {
+  DIFFICULTY_SETTINGS,
   DoomGameEngine,
   WEAPONS,
+  type Difficulty,
+  type GameMode,
   type GameState,
   type WeaponType,
 } from "../lib/three/game-engine";
@@ -25,9 +33,9 @@ export function DoomBioShooter() {
   const [gameState, setGameState] = useState<GameState>({
     health: 100,
     maxHealth: 100,
-    armor: 50,
+    armor: 100,
     maxArmor: 100,
-    ammo: { plasma: 150, shotgun: 30, annihilator: 10 },
+    ammo: { plasma: 300, shotgun: 60, annihilator: 30 },
     activeWeapon: "plasma",
     organIntegrity: 100,
     score: 0,
@@ -40,7 +48,14 @@ export function DoomBioShooter() {
     isPointerLocked: false,
     isFiring: false,
     faceExpression: "normal",
+    gameMode: "onboarding",
+    difficulty: "medium",
+    onboardingStep: 1,
+    dummiesDestroyed: 0,
   });
+
+  const [selectedModeTab, setSelectedModeTab] = useState<GameMode>("onboarding");
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>("medium");
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -73,6 +88,26 @@ export function DoomBioShooter() {
   const restartGame = () => {
     if (engineRef.current) {
       engineRef.current.restartGame();
+    }
+  };
+
+  const startMode = (mode: GameMode, difficulty: Difficulty = selectedDifficulty) => {
+    if (engineRef.current) {
+      engineRef.current.initMode(mode, difficulty);
+      mountRef.current?.requestPointerLock();
+    }
+  };
+
+  const setOnboardingStep = (step: number) => {
+    if (engineRef.current) {
+      engineRef.current.setOnboardingStep(step);
+    }
+  };
+
+  const changeDifficulty = (diff: Difficulty) => {
+    setSelectedDifficulty(diff);
+    if (engineRef.current) {
+      engineRef.current.setDifficulty(diff);
     }
   };
 
@@ -133,10 +168,28 @@ export function DoomBioShooter() {
           <span className="doom-logo-badge">DOOM</span>
           <strong>BIO-DEFENDER 3D</strong>
           <small>System Infection Lockdown</small>
+          <small className="mode-badge">
+            {gameState.gameMode === "onboarding" ? "🎓 ОБУЧЕНИЕ" : `⚔️ РЕАЛЬНАЯ ИГРА (${DIFFICULTY_SETTINGS[gameState.difficulty].name})`}
+          </small>
         </div>
 
         <div className="doom-organ-selector">
-          <span className="selector-label">SELECT SYSTEM:</span>
+          <button
+            type="button"
+            className="mode-switch-btn"
+            onClick={() => {
+              if (document.pointerLockElement) document.exitPointerLock();
+              if (gameState.gameMode === "onboarding") {
+                startMode("real", gameState.difficulty);
+              } else {
+                startMode("onboarding");
+              }
+            }}
+          >
+            {gameState.gameMode === "onboarding" ? "⚔️ Играть в реальном режиме" : "🎓 Перейти к Обучению"}
+          </button>
+
+          <span className="selector-label">SELECT SYSTEM / ОРГАН:</span>
           <div className="organ-pills">
             {organs.map((org) => (
               <button
@@ -165,22 +218,168 @@ export function DoomBioShooter() {
           </div>
         )}
 
-        {/* Click to Lock Pointer Overlay */}
+        {/* Step-by-Step Onboarding Floating Guide Overlay (Active during Pointer Lock) */}
+        {gameState.isPointerLocked && gameState.gameMode === "onboarding" && (
+          <div className="onboarding-hud-panel">
+            <div className="onboarding-hud-header">
+              <span className="onboarding-step-badge">ШАГ {gameState.onboardingStep} ИЗ 5</span>
+              <strong>
+                {gameState.onboardingStep === 1 && "Управление & Движение 3D"}
+                {gameState.onboardingStep === 2 && "Тренировка стрельбы & Оружие"}
+                {gameState.onboardingStep === 3 && "Обзор врагов & Уязвимости"}
+                {gameState.onboardingStep === 4 && "Защита органов & Броня"}
+                {gameState.onboardingStep === 5 && "Финал обучения - Готов к бою!"}
+              </strong>
+            </div>
+
+            <div className="onboarding-hud-body">
+              {gameState.onboardingStep === 1 && (
+                <p>Двигайтесь с помощью <strong>WASD</strong>. <strong>Space</strong> — вверх, <strong>Shift</strong> — вниз. В режиме онбординга вас <strong>не могут убить</strong>!</p>
+              )}
+              {gameState.onboardingStep === 2 && (
+                <div>
+                  <p>Зажмите <strong>ЛКМ</strong> для стрельбы. Патроны <strong>бесконечные</strong>! Уничтожено мишеней: <strong>{gameState.dummiesDestroyed}</strong></p>
+                  <div className="step-weapon-tips">
+                    <span><strong>1</strong> PLASMA (Быстрый огонь)</span>
+                    <span><strong>2</strong> SHOTGUN (Спрей)</span>
+                    <span><strong>3</strong> ANNIHILATOR (Ракеты)</span>
+                  </div>
+                </div>
+              )}
+              {gameState.onboardingStep === 3 && (
+                <div>
+                  <p>Впереди пассивные образцы врагов:</p>
+                  <div className="enemy-types-preview">
+                    <span>🔴 <strong>Вирус</strong> (быстрый, малый HP)</span>
+                    <span>🟡 <strong>Бактерия</strong> (прочная, стреляет)</span>
+                    <span>🟣 <strong>Некромант</strong> (высокий HP, аура)</span>
+                  </div>
+                </div>
+              )}
+              {gameState.onboardingStep === 4 && (
+                <p>Броня (BIO-ARMOR) поглощает 60% урона. Индикатор INTEGRITY показывает состояние органа — не дайте вирусам разрушить его!</p>
+              )}
+              {gameState.onboardingStep === 5 && (
+                <p>Отлично! Вы освоили стрельбу, движение и изучили врагов. Вы готовы к настоящей игре!</p>
+              )}
+            </div>
+
+            <div className="onboarding-hud-controls">
+              {gameState.onboardingStep > 1 && (
+                <button
+                  type="button"
+                  className="onboarding-nav-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOnboardingStep(gameState.onboardingStep - 1);
+                  }}
+                >
+                  <ChevronLeft size={16} /> Назад
+                </button>
+              )}
+              {gameState.onboardingStep < 5 ? (
+                <button
+                  type="button"
+                  className="onboarding-nav-btn next"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOnboardingStep(gameState.onboardingStep + 1);
+                  }}
+                >
+                  Следующий шаг <ChevronRight size={16} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="onboarding-nav-btn complete"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startMode("real", selectedDifficulty);
+                  }}
+                >
+                  <Play size={16} /> НАЧАТЬ РЕАЛЬНУЮ ИГРУ
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Start / Mode Selection Overlay */}
         {!gameState.isPointerLocked && !gameState.isGameOver && (
           <div className="doom-start-overlay">
-            <div className="start-modal">
-              <h2>DOOM: BIO-DEFENDER</h2>
+            <div className="start-modal mode-modal">
+              <h2>DOOM: BIO-DEFENDER 3D</h2>
               <p className="subtext">
-                Target Organ: <strong>{currentOrgan.name.toUpperCase()}</strong> ({currentOrgan.system})
+                Орган назначения: <strong>{currentOrgan.name.toUpperCase()}</strong> ({currentOrgan.system})
               </p>
-              <div className="controls-guide">
-                <div><span>WASD / Space / Shift</span> Movement</div>
-                <div><span>Mouse Aim + Click</span> Fire Weapon</div>
-                <div><span>Keys 1, 2, 3</span> Switch Weapons</div>
+
+              {/* Mode Selection Tabs */}
+              <div className="mode-tab-selector">
+                <button
+                  type="button"
+                  className={`tab-btn ${selectedModeTab === "onboarding" ? "active" : ""}`}
+                  onClick={() => setSelectedModeTab("onboarding")}
+                >
+                  <BookOpen size={18} /> ПОШАГОВОЕ ОБУЧЕНИЕ
+                </button>
+                <button
+                  type="button"
+                  className={`tab-btn ${selectedModeTab === "real" ? "active" : ""}`}
+                  onClick={() => setSelectedModeTab("real")}
+                >
+                  <Zap size={18} /> РЕАЛЬНАЯ ИГРА
+                </button>
               </div>
-              <button className="start-btn" onClick={() => mountRef.current?.requestPointerLock()}>
-                <Zap size={20} /> CLICK TO ENGAGE VIRUSES
-              </button>
+
+              {selectedModeTab === "onboarding" ? (
+                <div className="mode-tab-content">
+                  <div className="onboarding-feature-list">
+                    <div className="feat-item"><Shield size={16} className="text-emerald-400" /> <span><strong>Бессмертие:</strong> Вас не могут убить (тренировка без риска)</span></div>
+                    <div className="feat-item"><Target size={16} className="text-sky-400" /> <span><strong>Тренировка стрельбы:</strong> Мишени и бесконечные патроны</span></div>
+                    <div className="feat-item"><Skull size={16} className="text-purple-400" /> <span><strong>Обзор врагов & оружия:</strong> Все 3 типа врагов и 3 вида оружия</span></div>
+                  </div>
+
+                  <div className="controls-guide">
+                    <div><span>WASD / Space / Shift</span> Движение в 3D</div>
+                    <div><span>Мышь + ЛКМ</span> Прицеливание и стрельба</div>
+                    <div><span>Клавиши 1, 2, 3</span> Переключение оружия</div>
+                  </div>
+
+                  <button className="start-btn onboarding-start-btn" onClick={() => startMode("onboarding")}>
+                    <BookOpen size={20} /> НАЧАТЬ ОБУЧЕНИЕ С ШАГА 1
+                  </button>
+                </div>
+              ) : (
+                <div className="mode-tab-content">
+                  <p className="diff-title">ВЫБЕРИТЕ УРОВЕНЬ СЛОЖНОСТИ:</p>
+
+                  <div className="difficulty-grid">
+                    {(["easy", "medium", "hard"] as Difficulty[]).map((dKey) => (
+                      <button
+                        key={dKey}
+                        type="button"
+                        className={`diff-card ${selectedDifficulty === dKey ? "active" : ""} ${dKey}`}
+                        onClick={() => changeDifficulty(dKey)}
+                      >
+                        <strong className="diff-name">
+                          {dKey === "easy" && "🟢 ЛЕГКИЙ"}
+                          {dKey === "medium" && "🟡 СРЕДНИЙ"}
+                          {dKey === "hard" && "🔴 СЛОЖНЫЙ"}
+                        </strong>
+                        <small className="diff-desc">
+                          {dKey === "easy" && "Урон врагов -50%, слабые вирусы."}
+                          {dKey === "medium" && "Стандартный баланс DOOM."}
+                          {dKey === "hard" && "Агрессивные вирусы, +50% урона!"}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button className="start-btn engage-btn" onClick={() => startMode("real", selectedDifficulty)}>
+                    <Zap size={20} /> НАЧАТЬ БОЙ ({DIFFICULTY_SETTINGS[selectedDifficulty].name.toUpperCase()})
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
