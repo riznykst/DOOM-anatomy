@@ -290,6 +290,15 @@ export class DoomGameEngine {
   private isPointerLocked = false;
   private isMouseDown = false;
 
+  // Touch & Mobile Input State
+  private isTouchDevice = false;
+  private touchMoveVector = new THREE.Vector2(0, 0); // x: left/right, y: forward/back
+  private isTouchFiring = false;
+  private isTouchUp = false;
+  private isTouchDown = false;
+  private lookTouchId: number | null = null;
+  private lastTouchPos = new THREE.Vector2();
+
   // Organ Model
   private organ: LoadedOrgan | null = null;
   private currentOrganId: OrganId = "heart";
@@ -493,7 +502,7 @@ export class DoomGameEngine {
     const canvas = this.renderer.domElement;
 
     canvas.addEventListener("click", () => {
-      if (!this.isPointerLocked && !this.isGameOver) {
+      if (!this.isPointerLocked && !this.isGameOver && !this.isTouchDevice) {
         canvas.requestPointerLock();
       }
     });
@@ -509,6 +518,12 @@ export class DoomGameEngine {
     window.addEventListener("mousedown", this.onMouseDown);
     window.addEventListener("mouseup", this.onMouseUp);
     window.addEventListener("resize", this.onResize);
+
+    // Canvas Touch Look Listeners
+    canvas.addEventListener("touchstart", this.onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", this.onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", this.onTouchEnd, { passive: false });
+    canvas.addEventListener("touchcancel", this.onTouchEnd, { passive: false });
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -526,13 +541,75 @@ export class DoomGameEngine {
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.isPointerLocked) return;
+    if (!this.isPointerLocked && !this.isTouchDevice) return;
     const sensitivity = 0.0022;
-    this.cameraYaw -= e.movementX * sensitivity;
-    this.cameraPitch -= e.movementY * sensitivity;
+    this.rotateCamera(e.movementX * sensitivity, e.movementY * sensitivity);
+  };
 
+  public rotateCamera(dxSensitivity: number, dySensitivity: number) {
+    this.cameraYaw -= dxSensitivity;
+    this.cameraPitch -= dySensitivity;
     // Clamp pitch
     this.cameraPitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.cameraPitch));
+  }
+
+  public setTouchMoveVector(x: number, y: number) {
+    this.isTouchDevice = true;
+    this.touchMoveVector.set(x, y);
+  }
+
+  public setTouchFiring(firing: boolean) {
+    this.isTouchDevice = true;
+    this.isTouchFiring = firing;
+  }
+
+  public setTouchUpDown(up: boolean, down: boolean) {
+    this.isTouchDevice = true;
+    this.isTouchUp = up;
+    this.isTouchDown = down;
+  }
+
+  public markTouchDevice() {
+    this.isTouchDevice = true;
+  }
+
+  private onTouchStart = (e: TouchEvent) => {
+    this.isTouchDevice = true;
+    if (this.lookTouchId !== null) return;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      // Assign look touch if on right half of canvas or general canvas area
+      this.lookTouchId = touch.identifier;
+      this.lastTouchPos.set(touch.clientX, touch.clientY);
+      break;
+    }
+  };
+
+  private onTouchMove = (e: TouchEvent) => {
+    if (this.lookTouchId === null) return;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === this.lookTouchId) {
+        const dx = touch.clientX - this.lastTouchPos.x;
+        const dy = touch.clientY - this.lastTouchPos.y;
+        this.rotateCamera(dx * 0.004, dy * 0.004);
+        this.lastTouchPos.set(touch.clientX, touch.clientY);
+        break;
+      }
+    }
+  };
+
+  private onTouchEnd = (e: TouchEvent) => {
+    if (this.lookTouchId === null) return;
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === this.lookTouchId) {
+        this.lookTouchId = null;
+        break;
+      }
+    }
   };
 
   private onMouseDown = (e: MouseEvent) => {
@@ -868,7 +945,7 @@ export class DoomGameEngine {
 
     if (!this.isGameOver) {
       this.updatePlayerMovement(delta);
-      if (this.isMouseDown && this.isPointerLocked) {
+      if ((this.isMouseDown && this.isPointerLocked) || this.isTouchFiring) {
         this.tryFireWeapon();
       }
       this.updateEnemies(delta);
@@ -885,7 +962,7 @@ export class DoomGameEngine {
   };
 
   private updatePlayerMovement(delta: number) {
-    if (!this.isPointerLocked) return;
+    if (!this.isPointerLocked && !this.isTouchDevice) return;
 
     const speed = 6.5;
     const moveDir = new THREE.Vector3();
@@ -894,8 +971,15 @@ export class DoomGameEngine {
     if (this.keysPressed["KeyS"]) moveDir.z += 1;
     if (this.keysPressed["KeyA"]) moveDir.x -= 1;
     if (this.keysPressed["KeyD"]) moveDir.x += 1;
-    if (this.keysPressed["Space"]) moveDir.y += 0.8;
-    if (this.keysPressed["ShiftLeft"]) moveDir.y -= 0.8;
+
+    // Apply Touch Joystick
+    if (this.touchMoveVector.lengthSq() > 0.01) {
+      moveDir.x += this.touchMoveVector.x;
+      moveDir.z += this.touchMoveVector.y;
+    }
+
+    if (this.keysPressed["Space"] || this.isTouchUp) moveDir.y += 0.8;
+    if (this.keysPressed["ShiftLeft"] || this.isTouchDown) moveDir.y -= 0.8;
 
     moveDir.normalize();
 
@@ -1221,6 +1305,14 @@ export class DoomGameEngine {
     window.removeEventListener("mousedown", this.onMouseDown);
     window.removeEventListener("mouseup", this.onMouseUp);
     window.removeEventListener("resize", this.onResize);
+
+    const canvas = this.renderer?.domElement;
+    if (canvas) {
+      canvas.removeEventListener("touchstart", this.onTouchStart);
+      canvas.removeEventListener("touchmove", this.onTouchMove);
+      canvas.removeEventListener("touchend", this.onTouchEnd);
+      canvas.removeEventListener("touchcancel", this.onTouchEnd);
+    }
 
     this.clearEnemiesAndBullets();
     this.assets.dispose();

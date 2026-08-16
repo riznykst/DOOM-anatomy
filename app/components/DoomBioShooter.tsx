@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -57,6 +59,92 @@ export function DoomBioShooter() {
   const [selectedModeTab, setSelectedModeTab] = useState<GameMode>("onboarding");
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>("medium");
   const [isGameStarted, setIsGameStarted] = useState<boolean>(false);
+  const [isTouchDevice, setIsTouchDevice] = useState<boolean>(false);
+
+  // Joystick touch state
+  const joystickContainerRef = useRef<HTMLDivElement>(null);
+  const [joystickPos, setJoystickPos] = useState({ x: 0, y: 0 });
+  const [isJoystickActive, setIsJoystickActive] = useState(false);
+  const joystickTouchIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // Detect mobile touch capability
+    const checkTouch = () => {
+      if (("ontouchstart" in window) || navigator.maxTouchPoints > 0 || window.innerWidth < 1024) {
+        setIsTouchDevice(true);
+        if (engineRef.current) {
+          engineRef.current.markTouchDevice();
+        }
+      }
+    };
+    checkTouch();
+    window.addEventListener("resize", checkTouch);
+    return () => window.removeEventListener("resize", checkTouch);
+  }, []);
+
+  const handleJoystickStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (joystickTouchIdRef.current !== null) return;
+    const touch = e.changedTouches[0];
+    joystickTouchIdRef.current = touch.identifier;
+    setIsJoystickActive(true);
+    updateJoystick(touch.clientX, touch.clientY);
+  };
+
+  const handleJoystickMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (joystickTouchIdRef.current === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === joystickTouchIdRef.current) {
+        updateJoystick(touch.clientX, touch.clientY);
+        break;
+      }
+    }
+  };
+
+  const handleJoystickEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (joystickTouchIdRef.current === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === joystickTouchIdRef.current) {
+        joystickTouchIdRef.current = null;
+        setIsJoystickActive(false);
+        setJoystickPos({ x: 0, y: 0 });
+        if (engineRef.current) {
+          engineRef.current.setTouchMoveVector(0, 0);
+        }
+        break;
+      }
+    }
+  };
+
+  const updateJoystick = (clientX: number, clientY: number) => {
+    if (!joystickContainerRef.current) return;
+    const rect = joystickContainerRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const maxRadius = rect.width / 2 - 10;
+
+    let deltaX = clientX - centerX;
+    let deltaY = clientY - centerY;
+    const distance = Math.hypot(deltaX, deltaY);
+
+    if (distance > maxRadius) {
+      deltaX = (deltaX / distance) * maxRadius;
+      deltaY = (deltaY / distance) * maxRadius;
+    }
+
+    setJoystickPos({ x: deltaX, y: deltaY });
+
+    // Normalize input between -1 and 1
+    const normX = deltaX / maxRadius;
+    const normY = deltaY / maxRadius; // positive is down (backward in screen coords, map to +z)
+
+    if (engineRef.current) {
+      engineRef.current.setTouchMoveVector(normX, normY);
+    }
+  };
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -96,7 +184,9 @@ export function DoomBioShooter() {
     setIsGameStarted(true);
     if (engineRef.current) {
       engineRef.current.initMode(mode, difficulty);
-      mountRef.current?.requestPointerLock();
+      if (!isTouchDevice) {
+        mountRef.current?.requestPointerLock();
+      }
     }
   };
 
@@ -213,15 +303,88 @@ export function DoomBioShooter() {
       <div className="doom-viewport-container">
         <div ref={mountRef} className="doom-canvas-mount" />
 
-        {/* Crosshair */}
-        {gameState.isPointerLocked && !gameState.isGameOver && (
+        {/* Crosshair (visible when pointer locked OR on mobile touch device during gameplay) */}
+        {(gameState.isPointerLocked || isTouchDevice) && !gameState.isGameOver && (
           <div className="doom-crosshair">
             <Crosshair size={28} className={gameState.isFiring ? "firing" : ""} />
           </div>
         )}
 
-        {/* Click to re-acquire pointer lock if unlocked during game */}
-        {isGameStarted && !gameState.isPointerLocked && !gameState.isGameOver && (
+        {/* Mobile Touch Virtual Controls Overlay */}
+        {isGameStarted && !gameState.isGameOver && isTouchDevice && (
+          <div className="touch-controls-overlay">
+            {/* Left Joystick Area */}
+            <div
+              ref={joystickContainerRef}
+              className={`virtual-joystick-base ${isJoystickActive ? "active" : ""}`}
+              onTouchStart={handleJoystickStart}
+              onTouchMove={handleJoystickMove}
+              onTouchEnd={handleJoystickEnd}
+              onTouchCancel={handleJoystickEnd}
+            >
+              <div
+                className="virtual-joystick-stick"
+                style={{
+                  transform: `translate(${joystickPos.x}px, ${joystickPos.y}px)`,
+                }}
+              />
+            </div>
+
+            {/* Right Action Buttons */}
+            <div className="touch-action-cluster">
+              <div className="touch-up-down-btns">
+                <button
+                  type="button"
+                  className="touch-btn aux-btn"
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    engineRef.current?.setTouchUpDown(true, false);
+                  }}
+                  onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    engineRef.current?.setTouchUpDown(false, false);
+                  }}
+                >
+                  <ArrowUp size={20} />
+                </button>
+                <button
+                  type="button"
+                  className="touch-btn aux-btn"
+                  onTouchStart={(e) => {
+                    e.stopPropagation();
+                    engineRef.current?.setTouchUpDown(false, true);
+                  }}
+                  onTouchEnd={(e) => {
+                    e.stopPropagation();
+                    engineRef.current?.setTouchUpDown(false, false);
+                  }}
+                >
+                  <ArrowDown size={20} />
+                </button>
+              </div>
+
+              {/* Fire Button */}
+              <button
+                type="button"
+                className="touch-btn fire-btn"
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  engineRef.current?.setTouchFiring(true);
+                }}
+                onTouchEnd={(e) => {
+                  e.stopPropagation();
+                  engineRef.current?.setTouchFiring(false);
+                }}
+              >
+                🔥
+                <span>ОГОНЬ</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Click to re-acquire pointer lock if unlocked on desktop during game */}
+        {isGameStarted && !gameState.isPointerLocked && !isTouchDevice && !gameState.isGameOver && (
           <div className="doom-resume-prompt" onClick={() => mountRef.current?.requestPointerLock()}>
             <span>🎯 КЛИКНИТЕ ПО ЭКРАНУ ДЛЯ УПРАВЛЕНИЯ ПРИЦЕЛОМ</span>
           </div>
