@@ -56,6 +56,7 @@ export function DoomBioShooter() {
 
   const [selectedModeTab, setSelectedModeTab] = useState<GameMode>("onboarding");
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>("medium");
+  const [isGameStarted, setIsGameStarted] = useState<boolean>(false);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -92,6 +93,7 @@ export function DoomBioShooter() {
   };
 
   const startMode = (mode: GameMode, difficulty: Difficulty = selectedDifficulty) => {
+    setIsGameStarted(true);
     if (engineRef.current) {
       engineRef.current.initMode(mode, difficulty);
       mountRef.current?.requestPointerLock();
@@ -218,8 +220,15 @@ export function DoomBioShooter() {
           </div>
         )}
 
-        {/* Step-by-Step Onboarding Floating Guide Overlay (Active during Pointer Lock) */}
-        {gameState.isPointerLocked && gameState.gameMode === "onboarding" && (
+        {/* Click to re-acquire pointer lock if unlocked during game */}
+        {isGameStarted && !gameState.isPointerLocked && !gameState.isGameOver && (
+          <div className="doom-resume-prompt" onClick={() => mountRef.current?.requestPointerLock()}>
+            <span>🎯 КЛИКНИТЕ ПО ЭКРАНУ ДЛЯ УПРАВЛЕНИЯ ПРИЦЕЛОМ</span>
+          </div>
+        )}
+
+        {/* Step-by-Step Onboarding Floating Guide Overlay (Active when onboarding is started) */}
+        {isGameStarted && gameState.gameMode === "onboarding" && !gameState.isGameOver && (
           <div className="onboarding-hud-panel">
             <div className="onboarding-hud-header">
               <span className="onboarding-step-badge">ШАГ {gameState.onboardingStep} ИЗ 5</span>
@@ -304,8 +313,8 @@ export function DoomBioShooter() {
           </div>
         )}
 
-        {/* Start / Mode Selection Overlay */}
-        {!gameState.isPointerLocked && !gameState.isGameOver && (
+        {/* Initial Start / Mode Selection Modal Overlay */}
+        {!isGameStarted && !gameState.isGameOver && (
           <div className="doom-start-overlay">
             <div className="start-modal mode-modal">
               <h2>DOOM: BIO-DEFENDER 3D</h2>
