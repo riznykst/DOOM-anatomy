@@ -167,6 +167,10 @@ type GameCallbacks = {
   onAudioTrigger?: (type: "shoot" | "hit" | "kill" | "player_hurt" | "pickup" | "wave") => void;
 };
 
+// Performance optimization: Reusable scratch vectors to avoid per-frame allocations in 60 FPS animation loop
+const scratchVecA = new THREE.Vector3();
+const scratchVecB = new THREE.Vector3();
+
 // Simple retro Web Audio API Synthesizer
 class SoundSynth {
   private ctx: AudioContext | null = null;
@@ -965,7 +969,8 @@ export class DoomGameEngine {
     if (!this.isPointerLocked && !this.isTouchDevice) return;
 
     const speed = 6.5;
-    const moveDir = new THREE.Vector3();
+    // Reuse scratch vector to avoid per-frame vector instantiation
+    const moveDir = scratchVecB.set(0, 0, 0);
 
     if (this.keysPressed["KeyW"]) moveDir.z -= 1;
     if (this.keysPressed["KeyS"]) moveDir.z += 1;
@@ -1019,11 +1024,10 @@ export class DoomGameEngine {
       const e = this.enemies[i];
 
       if (e.speed > 0) {
-        // Move enemy towards player or organ
-        const targetPos = this.playerPos;
-        const dir = targetPos.clone().sub(e.position).normalize();
+        // Move enemy towards player or organ without per-frame vector allocations
+        scratchVecA.copy(this.playerPos).sub(e.position).normalize();
 
-        e.position.add(dir.multiplyScalar(e.speed * delta));
+        e.position.add(scratchVecA.multiplyScalar(e.speed * delta));
         e.mesh.position.copy(e.position);
       }
       e.mesh.rotation.y += delta * 1.5;
@@ -1043,8 +1047,8 @@ export class DoomGameEngine {
         if (e.type === "bacteria" && distToPlayer < 12) {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
-            const shootDir = this.playerPos.clone().sub(e.position).normalize();
-            this.createBullet(e.position.clone(), shootDir, 10, 12, 0.2, true, "#eab308");
+            scratchVecA.copy(this.playerPos).sub(e.position).normalize();
+            this.createBullet(e.position.clone(), scratchVecA, 10, 12, 0.2, true, "#eab308");
           }
         } else if (e.type === "necromancer") {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
@@ -1053,8 +1057,8 @@ export class DoomGameEngine {
             if (this.enemies.length < 20) {
               this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
             }
-            const shootDir = this.playerPos.clone().sub(e.position).normalize();
-            this.createBullet(e.position.clone(), shootDir, 12, 20, 0.3, true, "#a855f7");
+            scratchVecA.copy(this.playerPos).sub(e.position).normalize();
+            this.createBullet(e.position.clone(), scratchVecA, 12, 20, 0.3, true, "#a855f7");
           }
         }
 
@@ -1073,7 +1077,9 @@ export class DoomGameEngine {
   private updateBullets(delta: number) {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
-      b.position.add(b.velocity.clone().multiplyScalar(delta));
+      // Reuse scratch vector to eliminate per-bullet vector allocations on every frame
+      scratchVecA.copy(b.velocity).multiplyScalar(delta);
+      b.position.add(scratchVecA);
       b.mesh.position.copy(b.position);
       b.life -= delta;
 
@@ -1249,7 +1255,9 @@ export class DoomGameEngine {
   private updateParticles(delta: number) {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
+      // Reuse scratch vector to eliminate per-particle vector allocations on every frame
+      scratchVecA.copy(p.velocity).multiplyScalar(delta);
+      p.mesh.position.add(scratchVecA);
       p.life -= delta;
 
       if (p.scaleSpeed) {
