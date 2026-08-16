@@ -81,11 +81,30 @@ npm run build
 
 ---
 
-## ☁️ Deployment on Netlify
+## ☁️ Deployment on Netlify (Vinext Project Setup)
 
-1. Connect your GitHub / GitLab repository to **Netlify**.
-2. Configure build settings:
-   * **Branch**: `main`
+Since this project uses **Vinext** (Vite-based Next.js renderer), Vinext generates output in `dist/client` rather than standard `.next`.
+
+A pre-configured `netlify.toml` file is included in the repository root:
+
+```toml
+[build]
+  command = "npm run build"
+  publish = "dist/client"
+
+[build.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+```
+
+### Steps to Deploy:
+1. Connect your GitHub/GitLab repository to **Netlify**.
+2. Netlify will automatically detect `netlify.toml` with:
    * **Build Command**: `npm run build`
-   * **Publish Directory**: `.next`
-3. Click **Deploy**. Netlify will automatically trigger a build whenever changes are pushed to `main`.
+   * **Publish Directory**: `dist/client`
+   * **Next.js Plugin**: Skipped automatically via `NETLIFY_NEXT_PLUGIN_SKIP = "true"`
+3. Click **Deploy Site**.
