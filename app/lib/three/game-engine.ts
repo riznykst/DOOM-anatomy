@@ -167,6 +167,13 @@ type GameCallbacks = {
   onAudioTrigger?: (type: "shoot" | "hit" | "kill" | "player_hurt" | "pickup" | "wave") => void;
 };
 
+// Reusable scratch objects pre-allocated to eliminate Garbage Collection (GC) pauses
+// during high-frequency 60 FPS animation, physics, particle, and weapon update loops.
+const _tempVec3 = new THREE.Vector3();
+const _tempVec3B = new THREE.Vector3();
+const _tempMat4 = new THREE.Matrix4();
+const _tempEuler = new THREE.Euler();
+
 // Simple retro Web Audio API Synthesizer
 class SoundSynth {
   private ctx: AudioContext | null = null;
@@ -858,20 +865,26 @@ export class DoomGameEngine {
     else if (this.activeWeapon === "shotgun") this.synth.play("shoot_shotgun");
     else if (this.activeWeapon === "annihilator") this.synth.play("shoot_annihilator");
 
-    // Spawn Bullets
-    const shootDir = new THREE.Vector3(0, 0, -1);
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
-    shootDir.applyMatrix4(rotationMatrix).normalize();
+    // Spawn Bullets using pre-allocated scratch objects to avoid per-shot GC allocations
+    _tempVec3.set(0, 0, -1);
+    _tempEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+    _tempMat4.makeRotationFromEuler(_tempEuler);
+    _tempVec3.applyMatrix4(_tempMat4).normalize();
 
-    const muzzlePos = this.playerPos.clone().add(shootDir.clone().multiplyScalar(0.4));
+    const shootDir = _tempVec3.clone();
+    const muzzlePos = this.playerPos.clone().addScaledVector(shootDir, 0.4);
 
     if (this.activeWeapon === "plasma") {
       this.createBullet(muzzlePos, shootDir, 28, info.damage, 0.12, false, info.color, "plasma");
     } else if (this.activeWeapon === "shotgun") {
       // Shotgun pellet spread (8 pellets)
       for (let i = 0; i < 8; i++) {
-        const spreadDir = shootDir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
+        _tempVec3B.set(
+          (Math.random() - 0.5) * 0.18,
+          (Math.random() - 0.5) * 0.18,
+          (Math.random() - 0.5) * 0.18
+        );
+        const spreadDir = shootDir.clone().add(_tempVec3B).normalize();
         this.createBullet(muzzlePos, spreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
       }
     } else if (this.activeWeapon === "annihilator") {
@@ -965,30 +978,30 @@ export class DoomGameEngine {
     if (!this.isPointerLocked && !this.isTouchDevice) return;
 
     const speed = 6.5;
-    const moveDir = new THREE.Vector3();
+    // Reuse _tempVec3 for moveDir calculation to avoid allocation in movement loop
+    _tempVec3.set(0, 0, 0);
 
-    if (this.keysPressed["KeyW"]) moveDir.z -= 1;
-    if (this.keysPressed["KeyS"]) moveDir.z += 1;
-    if (this.keysPressed["KeyA"]) moveDir.x -= 1;
-    if (this.keysPressed["KeyD"]) moveDir.x += 1;
+    if (this.keysPressed["KeyW"]) _tempVec3.z -= 1;
+    if (this.keysPressed["KeyS"]) _tempVec3.z += 1;
+    if (this.keysPressed["KeyA"]) _tempVec3.x -= 1;
+    if (this.keysPressed["KeyD"]) _tempVec3.x += 1;
 
     // Apply Touch Joystick
     if (this.touchMoveVector.lengthSq() > 0.01) {
-      moveDir.x += this.touchMoveVector.x;
-      moveDir.z += this.touchMoveVector.y;
+      _tempVec3.x += this.touchMoveVector.x;
+      _tempVec3.z += this.touchMoveVector.y;
     }
 
-    if (this.keysPressed["Space"] || this.isTouchUp) moveDir.y += 0.8;
-    if (this.keysPressed["ShiftLeft"] || this.isTouchDown) moveDir.y -= 0.8;
+    if (this.keysPressed["Space"] || this.isTouchUp) _tempVec3.y += 0.8;
+    if (this.keysPressed["ShiftLeft"] || this.isTouchDown) _tempVec3.y -= 0.8;
 
-    moveDir.normalize();
+    _tempVec3.normalize();
 
-    // Rotate moveDir according to camera yaw
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationY(this.cameraYaw);
-    moveDir.applyMatrix4(rotationMatrix);
+    // Rotate moveDir according to camera yaw using pre-allocated matrix
+    _tempMat4.makeRotationY(this.cameraYaw);
+    _tempVec3.applyMatrix4(_tempMat4);
 
-    this.playerVel.copy(moveDir.multiplyScalar(speed * delta));
+    this.playerVel.copy(_tempVec3).multiplyScalar(speed * delta);
     this.playerPos.add(this.playerVel);
 
     // Keep player within arena bounds
@@ -998,7 +1011,8 @@ export class DoomGameEngine {
 
     // Update Camera Transform
     this.camera.position.copy(this.playerPos);
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
+    _tempEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+    this.camera.quaternion.setFromEuler(_tempEuler);
 
     // Update Player Dynamic Light
     const playerLight = this.scene.getObjectByName("playerLight") as THREE.PointLight;
@@ -1019,11 +1033,10 @@ export class DoomGameEngine {
       const e = this.enemies[i];
 
       if (e.speed > 0) {
-        // Move enemy towards player or organ
-        const targetPos = this.playerPos;
-        const dir = targetPos.clone().sub(e.position).normalize();
+        // Move enemy towards player using scratch vector to avoid per-enemy allocation
+        _tempVec3.copy(this.playerPos).sub(e.position).normalize();
 
-        e.position.add(dir.multiplyScalar(e.speed * delta));
+        e.position.addScaledVector(_tempVec3, e.speed * delta);
         e.mesh.position.copy(e.position);
       }
       e.mesh.rotation.y += delta * 1.5;
@@ -1043,18 +1056,19 @@ export class DoomGameEngine {
         if (e.type === "bacteria" && distToPlayer < 12) {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
-            const shootDir = this.playerPos.clone().sub(e.position).normalize();
-            this.createBullet(e.position.clone(), shootDir, 10, 12, 0.2, true, "#eab308");
+            _tempVec3.copy(this.playerPos).sub(e.position).normalize();
+            this.createBullet(e.position.clone(), _tempVec3.clone(), 10, 12, 0.2, true, "#eab308");
           }
         } else if (e.type === "necromancer") {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             this.synth.play("necromancer_summon");
             if (this.enemies.length < 20) {
-              this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+              _tempVec3B.copy(e.position).add(new THREE.Vector3(1, 0, 1));
+              this.spawnEnemy("virus", _tempVec3B);
             }
-            const shootDir = this.playerPos.clone().sub(e.position).normalize();
-            this.createBullet(e.position.clone(), shootDir, 12, 20, 0.3, true, "#a855f7");
+            _tempVec3.copy(this.playerPos).sub(e.position).normalize();
+            this.createBullet(e.position.clone(), _tempVec3.clone(), 12, 20, 0.3, true, "#a855f7");
           }
         }
 
@@ -1073,7 +1087,9 @@ export class DoomGameEngine {
   private updateBullets(delta: number) {
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
-      b.position.add(b.velocity.clone().multiplyScalar(delta));
+      // Reuse _tempVec3 to calculate delta velocity without allocating Vector3 each frame
+      _tempVec3.copy(b.velocity).multiplyScalar(delta);
+      b.position.add(_tempVec3);
       b.mesh.position.copy(b.position);
       b.life -= delta;
 
@@ -1249,7 +1265,9 @@ export class DoomGameEngine {
   private updateParticles(delta: number) {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.mesh.position.add(p.velocity.clone().multiplyScalar(delta));
+      // Reuse _tempVec3 to apply particle movement velocity without allocation
+      _tempVec3.copy(p.velocity).multiplyScalar(delta);
+      p.mesh.position.add(_tempVec3);
       p.life -= delta;
 
       if (p.scaleSpeed) {
