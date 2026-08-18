@@ -747,7 +747,7 @@ export class DoomGameEngine {
       // Virus: Spiky Icosahedron
       color = 0xef4444; // Red spike virus
       size = 0.35;
-      hp = 45 * diff.hpMult;
+      hp = 22.5 * diff.hpMult; // 50% HP reduction (formerly 45)
       speed = 3.2 * diff.speedMult;
       damage = 8 * diff.dmgMult;
 
@@ -770,7 +770,7 @@ export class DoomGameEngine {
       // Bacteria: Capsule/Rod shape
       color = 0xeab308; // Yellow toxic rod
       size = 0.55;
-      hp = 120 * diff.hpMult;
+      hp = 60 * diff.hpMult; // 50% HP reduction (formerly 120)
       speed = 1.6 * diff.speedMult;
       damage = 18 * diff.dmgMult;
 
@@ -786,7 +786,7 @@ export class DoomGameEngine {
       // Infected Leukocyte Necromancer
       color = 0xa855f7; // Corrupted Purple Leukocyte
       size = 0.85;
-      hp = 280 * diff.hpMult;
+      hp = 140 * diff.hpMult; // 50% HP reduction (formerly 280)
       speed = 1.2 * diff.speedMult;
       damage = 25 * diff.dmgMult;
 
