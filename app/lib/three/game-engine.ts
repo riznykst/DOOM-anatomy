@@ -171,6 +171,11 @@ type GameCallbacks = {
 const scratchVecA = new THREE.Vector3();
 const scratchVecB = new THREE.Vector3();
 
+// Performance optimization: Shared unit sphere geometry to avoid allocating a new WebGLBuffer
+// geometry for every particle, muzzle flash, and bullet fired during gameplay.
+const unitSphereGeom = new THREE.SphereGeometry(1, 8, 8);
+const lowPolySphereGeom = new THREE.SphereGeometry(1, 6, 6);
+
 // Simple retro Web Audio API Synthesizer
 class SoundSynth {
   private ctx: AudioContext | null = null;
@@ -887,9 +892,10 @@ export class DoomGameEngine {
   }
 
   private createBullet(pos: THREE.Vector3, dir: THREE.Vector3, speed: number, damage: number, radius: number, isEnemy: boolean, colorStr: string, weaponType?: WeaponType) {
-    const geom = new THREE.SphereGeometry(radius, 8, 8);
+    // Re-use shared unitSphereGeom and scale mesh to prevent memory allocation on every bullet fired
     const mat = new THREE.MeshBasicMaterial({ color: colorStr });
-    const mesh = new THREE.Mesh(geom, mat);
+    const mesh = new THREE.Mesh(unitSphereGeom, mat);
+    mesh.scale.setScalar(radius);
     mesh.position.copy(pos);
     this.scene.add(mesh);
 
@@ -907,9 +913,10 @@ export class DoomGameEngine {
   }
 
   private createMuzzleFlash(pos: THREE.Vector3, colorStr: string) {
-    const geom = new THREE.SphereGeometry(0.2, 8, 8);
+    // Re-use shared unitSphereGeom and scale mesh for instant muzzle flash creation
     const mat = new THREE.MeshBasicMaterial({ color: colorStr, transparent: true, opacity: 0.9 });
-    const mesh = new THREE.Mesh(geom, mat);
+    const mesh = new THREE.Mesh(unitSphereGeom, mat);
+    mesh.scale.setScalar(0.2);
     mesh.position.copy(pos);
     this.scene.add(mesh);
 
@@ -924,9 +931,10 @@ export class DoomGameEngine {
 
   private createExplosion(pos: THREE.Vector3, colorStr: string, count = 16) {
     for (let i = 0; i < count; i++) {
-      const geom = new THREE.SphereGeometry(0.06 + Math.random() * 0.08, 6, 6);
+      // Re-use lowPolySphereGeom and scale mesh to eliminate dozens of geometry allocations per explosion
       const mat = new THREE.MeshBasicMaterial({ color: colorStr });
-      const mesh = new THREE.Mesh(geom, mat);
+      const mesh = new THREE.Mesh(lowPolySphereGeom, mat);
+      mesh.scale.setScalar(0.06 + Math.random() * 0.08);
       mesh.position.copy(pos);
       this.scene.add(mesh);
 
