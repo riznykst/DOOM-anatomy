@@ -167,9 +167,13 @@ type GameCallbacks = {
   onAudioTrigger?: (type: "shoot" | "hit" | "kill" | "player_hurt" | "pickup" | "wave") => void;
 };
 
-// Performance optimization: Reusable scratch vectors to avoid per-frame allocations in 60 FPS animation loop
+// Performance optimization: Reusable scratch instances to avoid per-frame allocations in 60 FPS animation loop
 const scratchVecA = new THREE.Vector3();
 const scratchVecB = new THREE.Vector3();
+const scratchVecC = new THREE.Vector3();
+const scratchMatrix = new THREE.Matrix4();
+const scratchEuler = new THREE.Euler(0, 0, 0, "YXZ");
+const UP_VECTOR = new THREE.Vector3(0, 1, 0);
 
 // Performance optimization: Shared unit sphere geometry to avoid allocating a new WebGLBuffer
 // geometry for every particle, muzzle flash, and bullet fired during gameplay.
@@ -770,9 +774,9 @@ export class DoomGameEngine {
         const spikeGeom = new THREE.ConeGeometry(0.08, 0.4, 4);
         const spikeMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
         const spike = new THREE.Mesh(spikeGeom, spikeMat);
-        const dir = new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
-        spike.position.copy(dir.clone().multiplyScalar(size));
-        spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        const dir = scratchVecA.set((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
+        spike.position.copy(dir).multiplyScalar(size);
+        spike.quaternion.setFromUnitVectors(UP_VECTOR, dir);
         group.add(spike);
       }
     } else if (type === "bacteria") {
@@ -867,20 +871,24 @@ export class DoomGameEngine {
     else if (this.activeWeapon === "shotgun") this.synth.play("shoot_shotgun");
     else if (this.activeWeapon === "annihilator") this.synth.play("shoot_annihilator");
 
-    // Spawn Bullets
-    const shootDir = new THREE.Vector3(0, 0, -1);
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
-    shootDir.applyMatrix4(rotationMatrix).normalize();
-
-    const muzzlePos = this.playerPos.clone().add(shootDir.clone().multiplyScalar(0.4));
+    // Spawn Bullets - Re-use scratch objects to eliminate allocations per shot
+    scratchEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+    scratchMatrix.makeRotationFromEuler(scratchEuler);
+    const shootDir = scratchVecA.set(0, 0, -1).applyMatrix4(scratchMatrix).normalize();
+    const muzzlePos = scratchVecB.copy(this.playerPos).addScaledVector(shootDir, 0.4);
 
     if (this.activeWeapon === "plasma") {
       this.createBullet(muzzlePos, shootDir, 28, info.damage, 0.12, false, info.color, "plasma");
     } else if (this.activeWeapon === "shotgun") {
       // Shotgun pellet spread (8 pellets)
       for (let i = 0; i < 8; i++) {
-        const spreadDir = shootDir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
+        const spreadDir = scratchVecC
+          .set(
+            shootDir.x + (Math.random() - 0.5) * 0.18,
+            shootDir.y + (Math.random() - 0.5) * 0.18,
+            shootDir.z + (Math.random() - 0.5) * 0.18
+          )
+          .normalize();
         this.createBullet(muzzlePos, spreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
       }
     } else if (this.activeWeapon === "annihilator") {
@@ -996,10 +1004,9 @@ export class DoomGameEngine {
 
     moveDir.normalize();
 
-    // Rotate moveDir according to camera yaw
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationY(this.cameraYaw);
-    moveDir.applyMatrix4(rotationMatrix);
+    // Rotate moveDir according to camera yaw - Re-use scratchMatrix to avoid 60 Matrix4 allocations/sec
+    scratchMatrix.makeRotationY(this.cameraYaw);
+    moveDir.applyMatrix4(scratchMatrix);
 
     this.playerVel.copy(moveDir.multiplyScalar(speed * delta));
     this.playerPos.add(this.playerVel);
@@ -1040,38 +1047,41 @@ export class DoomGameEngine {
       }
       e.mesh.rotation.y += delta * 1.5;
 
-      const distToPlayer = e.position.distanceTo(this.playerPos);
+      // Performance optimization: Use distanceToSquared and lengthSq to eliminate Math.sqrt calls
+      const distToPlayerSq = e.position.distanceToSquared(this.playerPos);
 
       if (this.gameMode !== "onboarding") {
         // Melee attack
-        if (distToPlayer < e.radius + 0.6) {
+        const attackRadiusSum = e.radius + 0.6;
+        if (distToPlayerSq < attackRadiusSum * attackRadiusSum) {
           if (now - e.lastAttackTime > e.attackCooldown * 1000) {
             this.damagePlayer(e.damage);
             e.lastAttackTime = now;
           }
         }
 
-        // Ranged attacks for Bacteria & Necromancer
-        if (e.type === "bacteria" && distToPlayer < 12) {
+        // Ranged attacks for Bacteria & Necromancer (12^2 = 144)
+        if (e.type === "bacteria" && distToPlayerSq < 144) {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             scratchVecA.copy(this.playerPos).sub(e.position).normalize();
-            this.createBullet(e.position.clone(), scratchVecA, 10, 12, 0.2, true, "#eab308");
+            this.createBullet(e.position, scratchVecA, 10, 12, 0.2, true, "#eab308");
           }
         } else if (e.type === "necromancer") {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             this.synth.play("necromancer_summon");
             if (this.enemies.length < 20) {
-              this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+              scratchVecB.copy(e.position).add(scratchVecC.set(1, 0, 1));
+              this.spawnEnemy("virus", scratchVecB);
             }
             scratchVecA.copy(this.playerPos).sub(e.position).normalize();
-            this.createBullet(e.position.clone(), scratchVecA, 12, 20, 0.3, true, "#a855f7");
+            this.createBullet(e.position, scratchVecA, 12, 20, 0.3, true, "#a855f7");
           }
         }
 
-        // Organ Damage: Enemies close to center slowly damage organ
-        if (e.position.length() < 2.5) {
+        // Organ Damage: Enemies close to center slowly damage organ (2.5^2 = 6.25)
+        if (e.position.lengthSq() < 6.25) {
           const decayMult = DIFFICULTY_SETTINGS[this.difficulty].organDecayMult;
           this.organIntegrity = Math.max(0, this.organIntegrity - delta * 1.5 * decayMult);
           if (this.organIntegrity <= 0 && !this.isGameOver) {
@@ -1098,8 +1108,9 @@ export class DoomGameEngine {
       }
 
       if (b.isEnemy) {
-        // Enemy bullet hitting player
-        if (b.position.distanceTo(this.playerPos) < b.radius + 0.5) {
+        // Enemy bullet hitting player (Performance: distanceToSquared avoids Math.sqrt)
+        const hitRadiusSum = b.radius + 0.5;
+        if (b.position.distanceToSquared(this.playerPos) < hitRadiusSum * hitRadiusSum) {
           this.damagePlayer(b.damage);
           this.createExplosion(b.position, b.color, 6);
           this.scene.remove(b.mesh);
@@ -1107,11 +1118,12 @@ export class DoomGameEngine {
           continue;
         }
       } else {
-        // Player bullet hitting target dummies
+        // Player bullet hitting target dummies (Performance: distanceToSquared avoids Math.sqrt)
         let hitDummy = false;
         for (let d = this.targetDummies.length - 1; d >= 0; d--) {
           const dummy = this.targetDummies[d];
-          if (b.position.distanceTo(dummy.position) < b.radius + dummy.radius) {
+          const dummyRadiusSum = b.radius + dummy.radius;
+          if (b.position.distanceToSquared(dummy.position) < dummyRadiusSum * dummyRadiusSum) {
             dummy.hp -= b.damage;
             this.synth.play("hit");
             this.createExplosion(b.position, "#38bdf8", 12);
@@ -1125,9 +1137,10 @@ export class DoomGameEngine {
               this.dummiesDestroyed++;
               // Respawn dummy if in onboarding
               if (this.gameMode === "onboarding") {
+                const respawnPos = dummy.position.clone();
                 setTimeout(() => {
                   if (this.gameMode === "onboarding") {
-                    this.spawnTargetDummy(dummy.position.clone());
+                    this.spawnTargetDummy(respawnPos);
                   }
                 }, 1500);
               }
@@ -1143,19 +1156,20 @@ export class DoomGameEngine {
           continue;
         }
 
-        // Player bullet hitting enemies
+        // Player bullet hitting enemies (Performance: distanceToSquared avoids Math.sqrt)
         let hitEnemy = false;
         for (let j = this.enemies.length - 1; j >= 0; j--) {
           const e = this.enemies[j];
-          if (b.position.distanceTo(e.position) < b.radius + e.radius) {
+          const enemyRadiusSum = b.radius + e.radius;
+          if (b.position.distanceToSquared(e.position) < enemyRadiusSum * enemyRadiusSum) {
             e.hp -= b.damage;
             this.synth.play("hit");
             this.createExplosion(b.position, b.color, b.weaponType === "annihilator" ? 24 : 8);
 
-            // Annihilator Splash Damage
+            // Annihilator Splash Damage (4.0^2 = 16.0)
             if (b.weaponType === "annihilator") {
               this.enemies.forEach((otherE) => {
-                if (otherE.position.distanceTo(b.position) < 4.0) {
+                if (otherE.position.distanceToSquared(b.position) < 16.0) {
                   otherE.hp -= 100;
                 }
               });
