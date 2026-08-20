@@ -315,8 +315,19 @@ type Candidate = { distance: number; mesh: THREE.Mesh; index: number; point: THR
 function snapToSurface(hotspots: Hotspot[], pivot: THREE.Group, meshes: THREE.Mesh[]) {
   const targets = hotspots.map((hotspot) => new THREE.Vector3(...hotspot.position));
   const directions = targets.map((target) => target.clone().normalize());
-  const tiers: (Candidate | null)[][] = hotspots.map(() => DIRECTION_CONES.map(() => null));
   if (!meshes.length) return targets;
+
+  // Performance optimization: Pre-allocate candidate tier structures with initial Vector3 instances
+  // to avoid allocating objects and cloning vectors for every vertex across 100,000+ model vertices.
+  type CandidateTier = { distance: number; mesh: THREE.Mesh | null; index: number; point: THREE.Vector3 };
+  const tiers: CandidateTier[][] = hotspots.map(() =>
+    DIRECTION_CONES.map(() => ({
+      distance: Infinity,
+      mesh: null,
+      index: -1,
+      point: new THREE.Vector3(),
+    }))
+  );
 
   pivot.updateWorldMatrix(true, true);
   const toPivot = new THREE.Matrix4().copy(pivot.matrixWorld).invert();
@@ -331,20 +342,21 @@ function snapToSurface(hotspots: Hotspot[], pivot: THREE.Group, meshes: THREE.Me
     for (let i = 0; i < position.count; i += 1) {
       vertex.fromBufferAttribute(position, i).applyMatrix4(local);
       const radius = vertex.length();
+      // Pre-compute reciprocal radius once per vertex to avoid per-hotspot divisions
+      const invRadius = radius > 1e-5 ? 1 / radius : 0;
+
       for (let h = 0; h < targets.length; h += 1) {
         const distance = vertex.distanceToSquared(targets[h]);
-        const cosine = radius > 1e-5 ? vertex.dot(directions[h]) / radius : 1;
+        const cosine = invRadius > 0 ? vertex.dot(directions[h]) * invRadius : 1;
+
         for (let t = 0; t < DIRECTION_CONES.length; t += 1) {
           if (cosine < DIRECTION_CONES[t]) continue;
-          const best = tiers[h][t];
-          if (best && best.distance <= distance) continue;
-          if (best) {
-            best.distance = distance;
-            best.mesh = mesh;
-            best.index = i;
-            best.point.copy(vertex);
-          } else {
-            tiers[h][t] = { distance, mesh, index: i, point: vertex.clone() };
+          const tier = tiers[h][t];
+          if (distance < tier.distance) {
+            tier.distance = distance;
+            tier.mesh = mesh;
+            tier.index = i;
+            tier.point.copy(vertex);
           }
         }
       }
@@ -354,8 +366,8 @@ function snapToSurface(hotspots: Hotspot[], pivot: THREE.Group, meshes: THREE.Me
   const normal = new THREE.Vector3();
   const normalMatrix = new THREE.Matrix3();
   return targets.map((target, h) => {
-    const chosen = tiers[h].find(Boolean);
-    if (!chosen) return target;
+    const chosen = tiers[h].find((item) => item.mesh !== null);
+    if (!chosen || !chosen.mesh) return target;
     const normals = chosen.mesh.geometry.getAttribute("normal");
     if (normals) {
       local.multiplyMatrices(toPivot, chosen.mesh.matrixWorld);
