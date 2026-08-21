@@ -167,14 +167,30 @@ type GameCallbacks = {
   onAudioTrigger?: (type: "shoot" | "hit" | "kill" | "player_hurt" | "pickup" | "wave") => void;
 };
 
-// Performance optimization: Reusable scratch vectors to avoid per-frame allocations in 60 FPS animation loop
+// Performance optimization: Reusable scratch vectors, matrices, and euler to avoid per-frame allocations in 60 FPS animation loop
 const scratchVecA = new THREE.Vector3();
 const scratchVecB = new THREE.Vector3();
+const scratchVecC = new THREE.Vector3();
+const scratchEuler = new THREE.Euler(0, 0, 0, "YXZ");
+const scratchMatrix = new THREE.Matrix4();
+const zeroVec = new THREE.Vector3(0, 0, 0);
 
-// Performance optimization: Shared unit sphere geometry to avoid allocating a new WebGLBuffer
-// geometry for every particle, muzzle flash, and bullet fired during gameplay.
+// Performance optimization: Shared unit sphere & cone geometries and material cache to avoid material & geometry churn
 const unitSphereGeom = new THREE.SphereGeometry(1, 8, 8);
 const lowPolySphereGeom = new THREE.SphereGeometry(1, 6, 6);
+const spikeGeom = new THREE.ConeGeometry(0.08, 0.4, 4);
+
+const materialCache = new Map<string, THREE.MeshBasicMaterial>();
+
+function getBasicMaterial(color: string | number, transparent = false, opacity = 1.0): THREE.MeshBasicMaterial {
+  const key = `${color}_${transparent}_${opacity}`;
+  let mat = materialCache.get(key);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({ color, transparent, opacity });
+    materialCache.set(key, mat);
+  }
+  return mat;
+}
 
 // Simple retro Web Audio API Synthesizer
 class SoundSynth {
@@ -765,13 +781,12 @@ export class DoomGameEngine {
       const core = new THREE.Mesh(geom, mat);
       group.add(core);
 
-      // Add spikes
+      // Add spikes using shared geometry and cached material
+      const spikeMat = getBasicMaterial(0xff0055);
       for (let s = 0; s < 12; s++) {
-        const spikeGeom = new THREE.ConeGeometry(0.08, 0.4, 4);
-        const spikeMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
         const spike = new THREE.Mesh(spikeGeom, spikeMat);
-        const dir = new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
-        spike.position.copy(dir.clone().multiplyScalar(size));
+        const dir = scratchVecA.set((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2).normalize();
+        spike.position.copy(dir).multiplyScalar(size);
         spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
         group.add(spike);
       }
@@ -867,20 +882,24 @@ export class DoomGameEngine {
     else if (this.activeWeapon === "shotgun") this.synth.play("shoot_shotgun");
     else if (this.activeWeapon === "annihilator") this.synth.play("shoot_annihilator");
 
-    // Spawn Bullets
-    const shootDir = new THREE.Vector3(0, 0, -1);
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
-    shootDir.applyMatrix4(rotationMatrix).normalize();
+    // Spawn Bullets without per-shot vector or matrix allocations
+    const shootDir = scratchVecA.set(0, 0, -1);
+    scratchEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+    scratchMatrix.makeRotationFromEuler(scratchEuler);
+    shootDir.applyMatrix4(scratchMatrix).normalize();
 
-    const muzzlePos = this.playerPos.clone().add(shootDir.clone().multiplyScalar(0.4));
+    const muzzlePos = scratchVecB.copy(this.playerPos).addScaledVector(shootDir, 0.4);
 
     if (this.activeWeapon === "plasma") {
       this.createBullet(muzzlePos, shootDir, 28, info.damage, 0.12, false, info.color, "plasma");
     } else if (this.activeWeapon === "shotgun") {
       // Shotgun pellet spread (8 pellets)
       for (let i = 0; i < 8; i++) {
-        const spreadDir = shootDir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
+        const spreadDir = scratchVecC.set(
+          shootDir.x + (Math.random() - 0.5) * 0.18,
+          shootDir.y + (Math.random() - 0.5) * 0.18,
+          shootDir.z + (Math.random() - 0.5) * 0.18
+        ).normalize();
         this.createBullet(muzzlePos, spreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
       }
     } else if (this.activeWeapon === "annihilator") {
@@ -892,8 +911,8 @@ export class DoomGameEngine {
   }
 
   private createBullet(pos: THREE.Vector3, dir: THREE.Vector3, speed: number, damage: number, radius: number, isEnemy: boolean, colorStr: string, weaponType?: WeaponType) {
-    // Re-use shared unitSphereGeom and scale mesh to prevent memory allocation on every bullet fired
-    const mat = new THREE.MeshBasicMaterial({ color: colorStr });
+    // Re-use shared unitSphereGeom and cached basic material to prevent allocations on every bullet fired
+    const mat = getBasicMaterial(colorStr);
     const mesh = new THREE.Mesh(unitSphereGeom, mat);
     mesh.scale.setScalar(radius);
     mesh.position.copy(pos);
@@ -913,8 +932,8 @@ export class DoomGameEngine {
   }
 
   private createMuzzleFlash(pos: THREE.Vector3, colorStr: string) {
-    // Re-use shared unitSphereGeom and scale mesh for instant muzzle flash creation
-    const mat = new THREE.MeshBasicMaterial({ color: colorStr, transparent: true, opacity: 0.9 });
+    // Re-use shared unitSphereGeom and cached material for instant muzzle flash creation
+    const mat = getBasicMaterial(colorStr, true, 0.9);
     const mesh = new THREE.Mesh(unitSphereGeom, mat);
     mesh.scale.setScalar(0.2);
     mesh.position.copy(pos);
@@ -922,7 +941,7 @@ export class DoomGameEngine {
 
     this.particles.push({
       mesh,
-      velocity: new THREE.Vector3(),
+      velocity: zeroVec,
       life: 0.05,
       maxLife: 0.05,
       scaleSpeed: -3.0,
@@ -930,9 +949,9 @@ export class DoomGameEngine {
   }
 
   private createExplosion(pos: THREE.Vector3, colorStr: string, count = 16) {
+    const mat = getBasicMaterial(colorStr);
     for (let i = 0; i < count; i++) {
-      // Re-use lowPolySphereGeom and scale mesh to eliminate dozens of geometry allocations per explosion
-      const mat = new THREE.MeshBasicMaterial({ color: colorStr });
+      // Re-use lowPolySphereGeom and cached material to eliminate material & geometry allocations per explosion
       const mesh = new THREE.Mesh(lowPolySphereGeom, mat);
       mesh.scale.setScalar(0.06 + Math.random() * 0.08);
       mesh.position.copy(pos);
@@ -996,10 +1015,9 @@ export class DoomGameEngine {
 
     moveDir.normalize();
 
-    // Rotate moveDir according to camera yaw
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationY(this.cameraYaw);
-    moveDir.applyMatrix4(rotationMatrix);
+    // Rotate moveDir according to camera yaw using scratch matrix
+    scratchMatrix.makeRotationY(this.cameraYaw);
+    moveDir.applyMatrix4(scratchMatrix);
 
     this.playerVel.copy(moveDir.multiplyScalar(speed * delta));
     this.playerPos.add(this.playerVel);
@@ -1009,9 +1027,10 @@ export class DoomGameEngine {
     this.playerPos.y = THREE.MathUtils.clamp(this.playerPos.y, -6, 8);
     this.playerPos.z = THREE.MathUtils.clamp(this.playerPos.z, -14, 14);
 
-    // Update Camera Transform
+    // Update Camera Transform using scratch euler
     this.camera.position.copy(this.playerPos);
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
+    scratchEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+    this.camera.quaternion.setFromEuler(scratchEuler);
 
     // Update Player Dynamic Light
     const playerLight = this.scene.getObjectByName("playerLight") as THREE.PointLight;
@@ -1332,6 +1351,8 @@ export class DoomGameEngine {
 
     this.clearEnemiesAndBullets();
     this.assets.dispose();
+    materialCache.forEach((mat) => mat.dispose());
+    materialCache.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
