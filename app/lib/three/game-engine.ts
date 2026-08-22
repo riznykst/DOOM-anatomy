@@ -167,9 +167,15 @@ type GameCallbacks = {
   onAudioTrigger?: (type: "shoot" | "hit" | "kill" | "player_hurt" | "pickup" | "wave") => void;
 };
 
-// Performance optimization: Reusable scratch vectors to avoid per-frame allocations in 60 FPS animation loop
+// Performance optimization: Reusable scratch vectors, matrices, and euler angles to avoid per-frame
+// and per-shot allocations in the 60 FPS animation loop and firing routines.
 const scratchVecA = new THREE.Vector3();
 const scratchVecB = new THREE.Vector3();
+const scratchDir = new THREE.Vector3();
+const scratchMuzzlePos = new THREE.Vector3();
+const scratchSpreadDir = new THREE.Vector3();
+const scratchMatrix = new THREE.Matrix4();
+const scratchEuler = new THREE.Euler(0, 0, 0, "YXZ");
 
 // Performance optimization: Shared unit sphere geometry to avoid allocating a new WebGLBuffer
 // geometry for every particle, muzzle flash, and bullet fired during gameplay.
@@ -867,27 +873,33 @@ export class DoomGameEngine {
     else if (this.activeWeapon === "shotgun") this.synth.play("shoot_shotgun");
     else if (this.activeWeapon === "annihilator") this.synth.play("shoot_annihilator");
 
-    // Spawn Bullets
-    const shootDir = new THREE.Vector3(0, 0, -1);
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
-    shootDir.applyMatrix4(rotationMatrix).normalize();
+    // Spawn Bullets without per-shot Matrix4/Euler/Vector3 allocations
+    scratchEuler.set(this.cameraPitch, this.cameraYaw, 0);
+    scratchMatrix.makeRotationFromEuler(scratchEuler);
+    scratchDir.set(0, 0, -1).applyMatrix4(scratchMatrix).normalize();
 
-    const muzzlePos = this.playerPos.clone().add(shootDir.clone().multiplyScalar(0.4));
+    scratchMuzzlePos.copy(this.playerPos).addScaledVector(scratchDir, 0.4);
 
     if (this.activeWeapon === "plasma") {
-      this.createBullet(muzzlePos, shootDir, 28, info.damage, 0.12, false, info.color, "plasma");
+      this.createBullet(scratchMuzzlePos, scratchDir, 28, info.damage, 0.12, false, info.color, "plasma");
     } else if (this.activeWeapon === "shotgun") {
       // Shotgun pellet spread (8 pellets)
       for (let i = 0; i < 8; i++) {
-        const spreadDir = shootDir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
-        this.createBullet(muzzlePos, spreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
+        scratchSpreadDir
+          .set(
+            (Math.random() - 0.5) * 0.18,
+            (Math.random() - 0.5) * 0.18,
+            (Math.random() - 0.5) * 0.18
+          )
+          .add(scratchDir)
+          .normalize();
+        this.createBullet(scratchMuzzlePos, scratchSpreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
       }
     } else if (this.activeWeapon === "annihilator") {
-      this.createBullet(muzzlePos, shootDir, 18, info.damage, 0.35, false, info.color, "annihilator");
+      this.createBullet(scratchMuzzlePos, scratchDir, 18, info.damage, 0.35, false, info.color, "annihilator");
     }
 
-    this.createMuzzleFlash(muzzlePos, info.color);
+    this.createMuzzleFlash(scratchMuzzlePos, info.color);
     this.emitState();
   }
 
@@ -996,10 +1008,9 @@ export class DoomGameEngine {
 
     moveDir.normalize();
 
-    // Rotate moveDir according to camera yaw
-    const rotationMatrix = new THREE.Matrix4();
-    rotationMatrix.makeRotationY(this.cameraYaw);
-    moveDir.applyMatrix4(rotationMatrix);
+    // Rotate moveDir according to camera yaw using scratch matrix to avoid per-frame Matrix4 allocations
+    scratchMatrix.makeRotationY(this.cameraYaw);
+    moveDir.applyMatrix4(scratchMatrix);
 
     this.playerVel.copy(moveDir.multiplyScalar(speed * delta));
     this.playerPos.add(this.playerVel);
@@ -1009,9 +1020,10 @@ export class DoomGameEngine {
     this.playerPos.y = THREE.MathUtils.clamp(this.playerPos.y, -6, 8);
     this.playerPos.z = THREE.MathUtils.clamp(this.playerPos.z, -14, 14);
 
-    // Update Camera Transform
+    // Update Camera Transform using scratch Euler
+    scratchEuler.set(this.cameraPitch, this.cameraYaw, 0);
     this.camera.position.copy(this.playerPos);
-    this.camera.quaternion.setFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
+    this.camera.quaternion.setFromEuler(scratchEuler);
 
     // Update Player Dynamic Light
     const playerLight = this.scene.getObjectByName("playerLight") as THREE.PointLight;
@@ -1056,17 +1068,18 @@ export class DoomGameEngine {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             scratchVecA.copy(this.playerPos).sub(e.position).normalize();
-            this.createBullet(e.position.clone(), scratchVecA, 10, 12, 0.2, true, "#eab308");
+            this.createBullet(e.position, scratchVecA, 10, 12, 0.2, true, "#eab308");
           }
         } else if (e.type === "necromancer") {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             this.synth.play("necromancer_summon");
             if (this.enemies.length < 20) {
-              this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+              scratchVecA.copy(e.position).add(scratchSpreadDir.set(1, 0, 1));
+              this.spawnEnemy("virus", scratchVecA);
             }
             scratchVecA.copy(this.playerPos).sub(e.position).normalize();
-            this.createBullet(e.position.clone(), scratchVecA, 12, 20, 0.3, true, "#a855f7");
+            this.createBullet(e.position, scratchVecA, 12, 20, 0.3, true, "#a855f7");
           }
         }
 
