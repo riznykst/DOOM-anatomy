@@ -176,6 +176,19 @@ const scratchVecB = new THREE.Vector3();
 const unitSphereGeom = new THREE.SphereGeometry(1, 8, 8);
 const lowPolySphereGeom = new THREE.SphereGeometry(1, 6, 6);
 
+// Performance optimization: Material cache for MeshBasicMaterial to avoid allocations during shooting & particle effects
+const materialCache = new Map<string, THREE.MeshBasicMaterial>();
+
+function getBasicMaterial(colorStr: string, transparent = false, opacity = 1.0): THREE.MeshBasicMaterial {
+  const key = `${colorStr}_${transparent}_${opacity}`;
+  let mat = materialCache.get(key);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({ color: colorStr, transparent, opacity });
+    materialCache.set(key, mat);
+  }
+  return mat;
+}
+
 // Simple retro Web Audio API Synthesizer
 class SoundSynth {
   private ctx: AudioContext | null = null;
@@ -873,14 +886,15 @@ export class DoomGameEngine {
     rotationMatrix.makeRotationFromEuler(new THREE.Euler(this.cameraPitch, this.cameraYaw, 0, "YXZ"));
     shootDir.applyMatrix4(rotationMatrix).normalize();
 
-    const muzzlePos = this.playerPos.clone().add(shootDir.clone().multiplyScalar(0.4));
+    // Calculate muzzle position using scratch vector to avoid clone allocation
+    const muzzlePos = scratchVecA.copy(shootDir).multiplyScalar(0.4).add(this.playerPos);
 
     if (this.activeWeapon === "plasma") {
       this.createBullet(muzzlePos, shootDir, 28, info.damage, 0.12, false, info.color, "plasma");
     } else if (this.activeWeapon === "shotgun") {
       // Shotgun pellet spread (8 pellets)
       for (let i = 0; i < 8; i++) {
-        const spreadDir = shootDir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
+        const spreadDir = scratchVecB.copy(shootDir).add(new THREE.Vector3((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.18)).normalize();
         this.createBullet(muzzlePos, spreadDir, 24, info.damage, 0.08, false, info.color, "shotgun");
       }
     } else if (this.activeWeapon === "annihilator") {
@@ -892,8 +906,8 @@ export class DoomGameEngine {
   }
 
   private createBullet(pos: THREE.Vector3, dir: THREE.Vector3, speed: number, damage: number, radius: number, isEnemy: boolean, colorStr: string, weaponType?: WeaponType) {
-    // Re-use shared unitSphereGeom and scale mesh to prevent memory allocation on every bullet fired
-    const mat = new THREE.MeshBasicMaterial({ color: colorStr });
+    // Re-use shared unitSphereGeom and materialCache to prevent memory allocation on every bullet fired
+    const mat = getBasicMaterial(colorStr);
     const mesh = new THREE.Mesh(unitSphereGeom, mat);
     mesh.scale.setScalar(radius);
     mesh.position.copy(pos);
@@ -913,8 +927,8 @@ export class DoomGameEngine {
   }
 
   private createMuzzleFlash(pos: THREE.Vector3, colorStr: string) {
-    // Re-use shared unitSphereGeom and scale mesh for instant muzzle flash creation
-    const mat = new THREE.MeshBasicMaterial({ color: colorStr, transparent: true, opacity: 0.9 });
+    // Re-use shared unitSphereGeom and materialCache for instant muzzle flash creation without allocations
+    const mat = getBasicMaterial(colorStr, true, 0.9);
     const mesh = new THREE.Mesh(unitSphereGeom, mat);
     mesh.scale.setScalar(0.2);
     mesh.position.copy(pos);
@@ -930,9 +944,9 @@ export class DoomGameEngine {
   }
 
   private createExplosion(pos: THREE.Vector3, colorStr: string, count = 16) {
+    const mat = getBasicMaterial(colorStr);
     for (let i = 0; i < count; i++) {
-      // Re-use lowPolySphereGeom and scale mesh to eliminate dozens of geometry allocations per explosion
-      const mat = new THREE.MeshBasicMaterial({ color: colorStr });
+      // Re-use lowPolySphereGeom and materialCache to eliminate dozens of geometry/material allocations per explosion
       const mesh = new THREE.Mesh(lowPolySphereGeom, mat);
       mesh.scale.setScalar(0.06 + Math.random() * 0.08);
       mesh.position.copy(pos);
@@ -1056,22 +1070,23 @@ export class DoomGameEngine {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             scratchVecA.copy(this.playerPos).sub(e.position).normalize();
-            this.createBullet(e.position.clone(), scratchVecA, 10, 12, 0.2, true, "#eab308");
+            this.createBullet(e.position, scratchVecA, 10, 12, 0.2, true, "#eab308");
           }
         } else if (e.type === "necromancer") {
           if (now - e.lastShootTime > e.shootCooldown * 1000) {
             e.lastShootTime = now;
             this.synth.play("necromancer_summon");
             if (this.enemies.length < 20) {
-              this.spawnEnemy("virus", e.position.clone().add(new THREE.Vector3(1, 0, 1)));
+              scratchVecB.copy(e.position).add(new THREE.Vector3(1, 0, 1));
+              this.spawnEnemy("virus", scratchVecB);
             }
             scratchVecA.copy(this.playerPos).sub(e.position).normalize();
-            this.createBullet(e.position.clone(), scratchVecA, 12, 20, 0.3, true, "#a855f7");
+            this.createBullet(e.position, scratchVecA, 12, 20, 0.3, true, "#a855f7");
           }
         }
 
-        // Organ Damage: Enemies close to center slowly damage organ
-        if (e.position.length() < 2.5) {
+        // Organ Damage: Enemies close to center slowly damage organ (using lengthSq for speed)
+        if (e.position.lengthSq() < 6.25) {
           const decayMult = DIFFICULTY_SETTINGS[this.difficulty].organDecayMult;
           this.organIntegrity = Math.max(0, this.organIntegrity - delta * 1.5 * decayMult);
           if (this.organIntegrity <= 0 && !this.isGameOver) {
@@ -1098,8 +1113,9 @@ export class DoomGameEngine {
       }
 
       if (b.isEnemy) {
-        // Enemy bullet hitting player
-        if (b.position.distanceTo(this.playerPos) < b.radius + 0.5) {
+        // Enemy bullet hitting player (using distanceToSquared to avoid Math.sqrt)
+        const hitRadius = b.radius + 0.5;
+        if (b.position.distanceToSquared(this.playerPos) < hitRadius * hitRadius) {
           this.damagePlayer(b.damage);
           this.createExplosion(b.position, b.color, 6);
           this.scene.remove(b.mesh);
@@ -1107,11 +1123,12 @@ export class DoomGameEngine {
           continue;
         }
       } else {
-        // Player bullet hitting target dummies
+        // Player bullet hitting target dummies (using distanceToSquared to avoid Math.sqrt)
         let hitDummy = false;
         for (let d = this.targetDummies.length - 1; d >= 0; d--) {
           const dummy = this.targetDummies[d];
-          if (b.position.distanceTo(dummy.position) < b.radius + dummy.radius) {
+          const hitRadius = b.radius + dummy.radius;
+          if (b.position.distanceToSquared(dummy.position) < hitRadius * hitRadius) {
             dummy.hp -= b.damage;
             this.synth.play("hit");
             this.createExplosion(b.position, "#38bdf8", 12);
@@ -1125,9 +1142,10 @@ export class DoomGameEngine {
               this.dummiesDestroyed++;
               // Respawn dummy if in onboarding
               if (this.gameMode === "onboarding") {
+                const dummyPos = dummy.position.clone();
                 setTimeout(() => {
                   if (this.gameMode === "onboarding") {
-                    this.spawnTargetDummy(dummy.position.clone());
+                    this.spawnTargetDummy(dummyPos);
                   }
                 }, 1500);
               }
@@ -1143,19 +1161,20 @@ export class DoomGameEngine {
           continue;
         }
 
-        // Player bullet hitting enemies
+        // Player bullet hitting enemies (using distanceToSquared to avoid Math.sqrt)
         let hitEnemy = false;
         for (let j = this.enemies.length - 1; j >= 0; j--) {
           const e = this.enemies[j];
-          if (b.position.distanceTo(e.position) < b.radius + e.radius) {
+          const hitRadius = b.radius + e.radius;
+          if (b.position.distanceToSquared(e.position) < hitRadius * hitRadius) {
             e.hp -= b.damage;
             this.synth.play("hit");
             this.createExplosion(b.position, b.color, b.weaponType === "annihilator" ? 24 : 8);
 
-            // Annihilator Splash Damage
+            // Annihilator Splash Damage (4.0 * 4.0 = 16.0)
             if (b.weaponType === "annihilator") {
               this.enemies.forEach((otherE) => {
-                if (otherE.position.distanceTo(b.position) < 4.0) {
+                if (otherE.position.distanceToSquared(b.position) < 16.0) {
                   otherE.hp -= 100;
                 }
               });
