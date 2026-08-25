@@ -5,3 +5,7 @@
 ## 2025-05-19 - Pre-allocate Candidates in Mesh Geometry Processing
 **Learning:** In Three.js geometry processing loops (like hotspot surface snapping across 100,000+ vertices), instantiating candidate objects or cloning vectors inside nested loops creates thousands of heap allocations and GC spikes during organ loading.
 **Action:** Pre-allocate candidate tier structures with pre-instantiated `Vector3` instances and pre-compute reciprocal scalars (like `invRadius`) before looping over buffer attributes.
+
+## 2025-05-20 - Cache Basic Materials and Geometries for Dynamic Bullets & Spikes
+**Learning:** Instantiating `new THREE.MeshBasicMaterial()` or `new THREE.ConeGeometry()` per projectile/particle/enemy during continuous firing or enemy spawning creates hundreds of short-lived WebGL objects, triggering frequent garbage collection stutters.
+**Action:** Use a material cache Map for basic bullet/particle colors and pre-allocate shared geometries (like virus spikes) at the module scope.
