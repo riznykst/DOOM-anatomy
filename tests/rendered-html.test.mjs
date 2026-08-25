@@ -30,8 +30,8 @@ test("server-renders Nanobot Bio-Defender starter page", async () => {
   const html = await response.text();
   assert.match(html, /NANOBOT/);
   assert.match(html, /BIO-DEFENDER 3D/);
-  assert.match(html, /Кровеносная система/);
-  assert.match(html, /ЛОКАЦИЯ/);
+  assert.match(html, /Circulatory System/);
+  assert.match(html, /LOCATION/);
   assert.match(html, /Heart/);
   assert.match(html, /ORGAN INTEGRITY/);
 });

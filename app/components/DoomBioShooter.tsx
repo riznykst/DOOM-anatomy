@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
+  Globe,
   Heart,
   Play,
   RotateCcw,
@@ -17,7 +18,8 @@ import {
   Target,
   Zap,
 } from "lucide-react";
-import { organById, organs, type OrganId } from "../lib/anatomy-data";
+import { getLocalizedOrgan, organById, organs, type OrganId } from "../lib/anatomy-data";
+import { useI18n } from "../lib/i18n";
 import {
   DIFFICULTY_SETTINGS,
   DoomGameEngine,
@@ -31,6 +33,7 @@ import {
 export function DoomBioShooter() {
   const mountRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<DoomGameEngine | null>(null);
+  const { lang, setLang, t } = useI18n();
 
   const [gameState, setGameState] = useState<GameState>({
     health: 100,
@@ -215,8 +218,15 @@ export function DoomBioShooter() {
     }
   };
 
-  const currentOrgan = organById[gameState.organId] || organById.heart;
+  const currentOrganRaw = organById[gameState.organId] || organById.heart;
+  const currentOrgan = getLocalizedOrgan(currentOrganRaw, lang);
   const activeWeaponInfo = WEAPONS[gameState.activeWeapon];
+
+  const getDifficultyName = (dKey: Difficulty) => {
+    if (dKey === "easy") return t.diffEasyName;
+    if (dKey === "medium") return t.diffMediumName;
+    return t.diffHardName;
+  };
 
   // Animated Doom-style Face / Helmet SVG portrait based on health / state
   const renderFace = () => {
@@ -269,15 +279,26 @@ export function DoomBioShooter() {
       {/* Top Banner / Organ Selection Bar */}
       <header className="doom-header">
         <div className="doom-brand">
-          <span className="doom-logo-badge">NANOBOT</span>
-          <strong>BIO-DEFENDER 3D</strong>
-          <small>Кровеносная система & Межклеточная жидкость</small>
+          <span className="doom-logo-badge">{t.brandTitle}</span>
+          <strong>{t.brandSubtitle}</strong>
+          <small>{t.brandDesc}</small>
           <small className="mode-badge">
-            {gameState.gameMode === "onboarding" ? "🎓 ОБУЧЕНИЕ НАНОБОТА" : `⚔️ БОЕВОЙ РЕЖИМ (${DIFFICULTY_SETTINGS[gameState.difficulty].name})`}
+            {gameState.gameMode === "onboarding" ? t.modeOnboardingBadge : t.modeRealBadge(getDifficultyName(gameState.difficulty))}
           </small>
         </div>
 
         <div className="doom-organ-selector">
+          {/* Language Toggle */}
+          <button
+            type="button"
+            className="lang-switch-btn"
+            onClick={() => setLang(lang === "en" ? "ru" : "en")}
+            title="Switch Language / Сменить язык"
+          >
+            <Globe size={16} />
+            <strong>{lang === "en" ? "EN" : "RU"}</strong>
+          </button>
+
           <button
             type="button"
             className="mode-switch-btn"
@@ -290,7 +311,7 @@ export function DoomBioShooter() {
               }
             }}
           >
-            {gameState.gameMode === "onboarding" ? "⚔️ Играть в реальном режиме" : "🎓 Перейти к Обучению"}
+            {gameState.gameMode === "onboarding" ? t.playRealMode : t.goToOnboarding}
           </button>
 
           {!isTouchDevice && (
@@ -300,24 +321,27 @@ export function DoomBioShooter() {
               onClick={toggleAimMode}
               title="Переключить режим управления прицелом"
             >
-              {gameState.aimMode === "cursor" ? "🎯 Прицел: Курсор мыши" : "🔒 Прицел: Pointer Lock"}
+              {gameState.aimMode === "cursor" ? t.aimCursor : t.aimPointerLock}
             </button>
           )}
 
-          <span className="selector-label">ЛОКАЦИЯ (АРТЕРИИ, ВЕНЫ, КАПИЛЛЯРЫ):</span>
+          <span className="selector-label">{t.locationLabel}</span>
           <div className="organ-pills">
-            {organs.map((org) => (
-              <button
-                key={org.id}
-                type="button"
-                className={`organ-pill ${gameState.organId === org.id ? "active" : ""}`}
-                onClick={() => selectLevel(org.id)}
-                style={{ "--accent": org.accent } as React.CSSProperties}
-              >
-                <span className="pill-icon">{org.icon}</span>
-                <span className="pill-name">{org.name}</span>
-              </button>
-            ))}
+            {organs.map((rawOrg) => {
+              const org = getLocalizedOrgan(rawOrg, lang);
+              return (
+                <button
+                  key={org.id}
+                  type="button"
+                  className={`organ-pill ${gameState.organId === org.id ? "active" : ""}`}
+                  onClick={() => selectLevel(org.id)}
+                  style={{ "--accent": org.accent } as React.CSSProperties}
+                >
+                  <span className="pill-icon">{org.icon}</span>
+                  <span className="pill-name">{org.name}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </header>
@@ -415,7 +439,7 @@ export function DoomBioShooter() {
                 }}
               >
                 🔥
-                <span>ОГОНЬ</span>
+                <span>{t.fireBtn}</span>
               </button>
             </div>
           </div>
@@ -424,13 +448,13 @@ export function DoomBioShooter() {
         {/* Desktop Resume or Cursor Prompt Overlay */}
         {isGameStarted && !gameState.isPointerLocked && !isTouchDevice && !gameState.isGameOver && gameState.aimMode === "pointerlock" && (
           <div className="doom-resume-prompt" onClick={() => mountRef.current?.requestPointerLock()}>
-            <span>🎯 КЛИКНИТЕ ПО ЭКРАНУ ДЛЯ ВХОДА В POINTER LOCK</span>
+            <span>{t.pointerLockPrompt}</span>
           </div>
         )}
 
         {isGameStarted && !gameState.isPointerLocked && !isTouchDevice && !gameState.isGameOver && gameState.aimMode === "cursor" && (
           <div className="doom-cursor-hint">
-            <span>🎯 ДВИГАЙТЕ МЫШЬЮ ДЛЯ ПРИЦЕЛИВАНИЯ | ЛКМ — СТРЕЛЬБА</span>
+            <span>{t.cursorHint}</span>
           </div>
         )}
 
@@ -438,46 +462,40 @@ export function DoomBioShooter() {
         {isGameStarted && gameState.gameMode === "onboarding" && !gameState.isGameOver && (
           <div className="onboarding-hud-panel">
             <div className="onboarding-hud-header">
-              <span className="onboarding-step-badge">ШАГ {gameState.onboardingStep} ИЗ 5</span>
+              <span className="onboarding-step-badge">{t.stepBadge(gameState.onboardingStep)}</span>
               <strong>
-                {gameState.onboardingStep === 1 && "Нанобот: Навигация в сосудах"}
-                {gameState.onboardingStep === 2 && "Стрельба & Вооружение нанобота"}
-                {gameState.onboardingStep === 3 && "Анализ вирусов и бактерий"}
-                {gameState.onboardingStep === 4 && "Защитная оболочка & Целостность тканей"}
-                {gameState.onboardingStep === 5 && "Нанобот готов к зачистке!"}
+                {gameState.onboardingStep === 1 && t.step1Title}
+                {gameState.onboardingStep === 2 && t.step2Title}
+                {gameState.onboardingStep === 3 && t.step3Title}
+                {gameState.onboardingStep === 4 && t.step4Title}
+                {gameState.onboardingStep === 5 && t.step5Title}
               </strong>
             </div>
 
             <div className="onboarding-hud-body">
-              {gameState.onboardingStep === 1 && (
-                <p>Вы — <strong>микроскопический Нанобот</strong> от первого лица. Маневрируйте по артериям и капиллярам с помощью <strong>WASD</strong>, <strong>Space</strong> (вверх) и <strong>Shift</strong> (вниз). В режиме обучения вы <strong>бессмертны</strong>!</p>
-              )}
+              {gameState.onboardingStep === 1 && <p>{t.step1Desc}</p>}
               {gameState.onboardingStep === 2 && (
                 <div>
-                  <p>Зажмите <strong>ЛКМ</strong> для ликвидации угроз. Заряд <strong>бесконечный</strong>! Уничтожено тренировочных целей: <strong>{gameState.dummiesDestroyed}</strong></p>
+                  <p>{t.step2Desc(gameState.dummiesDestroyed)}</p>
                   <div className="step-weapon-tips">
-                    <span><strong>1</strong> PLASMA (Плазменный антиген)</span>
-                    <span><strong>2</strong> SHOTGUN (Био-дробовик)</span>
-                    <span><strong>3</strong> ANNIHILATOR (Нано-аннигилятор)</span>
+                    <span><strong>1</strong> PLASMA (Plasma Antibody)</span>
+                    <span><strong>2</strong> SHOTGUN (Bio-Shotgun)</span>
+                    <span><strong>3</strong> ANNIHILATOR (Nanite Annihilator)</span>
                   </div>
                 </div>
               )}
               {gameState.onboardingStep === 3 && (
                 <div>
-                  <p>Впереди патогенные вирусы и бактерии в межклеточной жидкости (HP снижено на 50%):</p>
+                  <p>{t.step3Desc}</p>
                   <div className="enemy-types-preview">
-                    <span>🔴 <strong>Вирус</strong> (быстрый, 22.5 HP)</span>
-                    <span>🟡 <strong>Бактерия</strong> (стреляющая, 60 HP)</span>
-                    <span>🟣 <strong>Некромант</strong> (опасный штамм, 140 HP)</span>
+                    <span>{t.virusLabel}</span>
+                    <span>{t.bacteriaLabel}</span>
+                    <span>{t.necromancerLabel}</span>
                   </div>
                 </div>
               )}
-              {gameState.onboardingStep === 4 && (
-                <p>Броня Нанобота поглощает 60% урона. Индикатор INTEGRITY показывает целостность органа — защитите сосуды и ткани от вирусов!</p>
-              )}
-              {gameState.onboardingStep === 5 && (
-                <p>Отлично! Нанобот полностью настроен. Запустите протокол зачистки артерий, вен и межклеточных жидкостей!</p>
-              )}
+              {gameState.onboardingStep === 4 && <p>{t.step4Desc}</p>}
+              {gameState.onboardingStep === 5 && <p>{t.step5Desc}</p>}
             </div>
 
             <div className="onboarding-hud-controls">
@@ -490,7 +508,7 @@ export function DoomBioShooter() {
                     setOnboardingStep(gameState.onboardingStep - 1);
                   }}
                 >
-                  <ChevronLeft size={16} /> Назад
+                  <ChevronLeft size={16} /> {t.prevStep}
                 </button>
               )}
               {gameState.onboardingStep < 5 ? (
@@ -502,7 +520,7 @@ export function DoomBioShooter() {
                     setOnboardingStep(gameState.onboardingStep + 1);
                   }}
                 >
-                  Следующий шаг <ChevronRight size={16} />
+                  {t.nextStep} <ChevronRight size={16} />
                 </button>
               ) : (
                 <button
@@ -513,7 +531,7 @@ export function DoomBioShooter() {
                     startMode("real", selectedDifficulty);
                   }}
                 >
-                  <Play size={16} /> НАЧАТЬ РЕАЛЬНУЮ ИГРУ
+                  <Play size={16} /> {t.startRealGame}
                 </button>
               )}
             </div>
@@ -524,10 +542,8 @@ export function DoomBioShooter() {
         {!isGameStarted && !gameState.isGameOver && (
           <div className="doom-start-overlay">
             <div className="start-modal mode-modal">
-              <h2>NANOBOT: BIO-DEFENDER 3D</h2>
-              <p className="subtext">
-                Вы — Нанобот от первого лица. Локация: <strong>{currentOrgan.name.toUpperCase()}</strong> (Артерии, вены, сосуды, капилляры и межклеточная жидкость)
-              </p>
+              <h2>{t.modalTitle}</h2>
+              <p className="subtext">{t.modalSubtext(currentOrgan.name)}</p>
 
               {/* Mode Selection Tabs */}
               <div className="mode-tab-selector">
@@ -536,38 +552,38 @@ export function DoomBioShooter() {
                   className={`tab-btn ${selectedModeTab === "onboarding" ? "active" : ""}`}
                   onClick={() => setSelectedModeTab("onboarding")}
                 >
-                  <BookOpen size={18} /> ПОШАГОВОЕ ОБУЧЕНИЕ
+                  <BookOpen size={18} /> {t.tabOnboarding}
                 </button>
                 <button
                   type="button"
                   className={`tab-btn ${selectedModeTab === "real" ? "active" : ""}`}
                   onClick={() => setSelectedModeTab("real")}
                 >
-                  <Zap size={18} /> РЕАЛЬНАЯ ИГРА
+                  <Zap size={18} /> {t.tabReal}
                 </button>
               </div>
 
               {selectedModeTab === "onboarding" ? (
                 <div className="mode-tab-content">
                   <div className="onboarding-feature-list">
-                    <div className="feat-item"><Shield size={16} className="text-emerald-400" /> <span><strong>Миссия Нанобота:</strong> Путешествуйте по артериям, венам, капиллярам и межклеточным жидкостям</span></div>
-                    <div className="feat-item"><Target size={16} className="text-sky-400" /> <span><strong>Ослабленные вирусы:</strong> HP всех патогенов снижено на 50%!</span></div>
-                    <div className="feat-item"><Skull size={16} className="text-purple-400" /> <span><strong>Тренировочный режим:</strong> Бессмертие и бесконечные заряды орудий</span></div>
+                    <div className="feat-item"><Shield size={16} className="text-emerald-400" /> <span>{t.onboardingFeat1}</span></div>
+                    <div className="feat-item"><Target size={16} className="text-sky-400" /> <span>{t.onboardingFeat2}</span></div>
+                    <div className="feat-item"><Skull size={16} className="text-purple-400" /> <span>{t.onboardingFeat3}</span></div>
                   </div>
 
                   <div className="controls-guide">
-                    <div><span>WASD / Space / Shift</span> Навигация нанобота в 3D</div>
-                    <div><span>Мышь + ЛКМ</span> Прицеливание и стрельба</div>
-                    <div><span>Клавиши 1, 2, 3</span> Переключение нано-оружия</div>
+                    <div><span>WASD / Space / Shift</span> {t.controlsGuideNav}</div>
+                    <div><span>Mouse + Left Click</span> {t.controlsGuideAim}</div>
+                    <div><span>Keys 1, 2, 3</span> {t.controlsGuideWeapons}</div>
                   </div>
 
                   <button className="start-btn onboarding-start-btn" onClick={() => startMode("onboarding")}>
-                    <BookOpen size={20} /> НАЧАТЬ ОБУЧЕНИЕ С ШАГА 1
+                    <BookOpen size={20} /> {t.startTrainingBtn}
                   </button>
                 </div>
               ) : (
                 <div className="mode-tab-content">
-                  <p className="diff-title">ВЫБЕРИТЕ УРОВЕНЬ СЛОЖНОСТИ:</p>
+                  <p className="diff-title">{t.selectDifficultyTitle}</p>
 
                   <div className="difficulty-grid">
                     {(["easy", "medium", "hard"] as Difficulty[]).map((dKey) => (
@@ -577,22 +593,18 @@ export function DoomBioShooter() {
                         className={`diff-card ${selectedDifficulty === dKey ? "active" : ""} ${dKey}`}
                         onClick={() => changeDifficulty(dKey)}
                       >
-                        <strong className="diff-name">
-                          {dKey === "easy" && "🟢 ЛЕГКИЙ"}
-                          {dKey === "medium" && "🟡 СРЕДНИЙ"}
-                          {dKey === "hard" && "🔴 СЛОЖНЫЙ"}
-                        </strong>
+                        <strong className="diff-name">{getDifficultyName(dKey)}</strong>
                         <small className="diff-desc">
-                          {dKey === "easy" && "Урон врагов -50%, слабые вирусы."}
-                          {dKey === "medium" && "Стандартный баланс DOOM."}
-                          {dKey === "hard" && "Агрессивные вирусы, +50% урона!"}
+                          {dKey === "easy" && t.diffEasyDesc}
+                          {dKey === "medium" && t.diffMediumDesc}
+                          {dKey === "hard" && t.diffHardDesc}
                         </small>
                       </button>
                     ))}
                   </div>
 
                   <button className="start-btn engage-btn" onClick={() => startMode("real", selectedDifficulty)}>
-                    <Zap size={20} /> НАЧАТЬ БОЙ ({DIFFICULTY_SETTINGS[selectedDifficulty].name.toUpperCase()})
+                    <Zap size={20} /> {t.startCombatBtn(getDifficultyName(selectedDifficulty))}
                   </button>
                 </div>
               )}
@@ -605,13 +617,13 @@ export function DoomBioShooter() {
           <div className="doom-start-overlay game-over">
             <div className="start-modal result-modal">
               <h2 className={gameState.isVictory ? "victory" : "defeated"}>
-                {gameState.isVictory ? "SYSTEM PURIFIED!" : "ORGAN COLLAPSE!"}
+                {gameState.isVictory ? t.victoryTitle : t.defeatTitle}
               </h2>
               <p className="summary-stats">
-                Score: <strong>{gameState.score}</strong> | Kills: <strong>{gameState.kills}</strong> | Wave: <strong>{gameState.wave}</strong>
+                {t.statsSummary(gameState.score, gameState.kills, gameState.wave)}
               </p>
               <button className="start-btn restart" onClick={restartGame}>
-                <RotateCcw size={20} /> PURGE AGAIN (KEY R)
+                <RotateCcw size={20} /> {t.purgeAgainBtn}
               </button>
             </div>
           </div>
@@ -622,13 +634,13 @@ export function DoomBioShooter() {
       <footer className="doom-hud">
         {/* Block 1: Ammo Count */}
         <div className="hud-block ammo-block">
-          <span className="hud-label">AMMO ({activeWeaponInfo.ammoName})</span>
+          <span className="hud-label">{t.hudAmmo(activeWeaponInfo.ammoName)}</span>
           <span className="hud-value ammo-val">{gameState.ammo[gameState.activeWeapon]}</span>
         </div>
 
         {/* Block 2: Health */}
         <div className="hud-block health-block">
-          <span className="hud-label"><Heart size={12} /> HEALTH</span>
+          <span className="hud-label"><Heart size={12} /> {t.hudHealth}</span>
           <span className={`hud-value ${gameState.health < 30 ? "critical" : ""}`}>{gameState.health}%</span>
         </div>
 
@@ -639,13 +651,13 @@ export function DoomBioShooter() {
 
         {/* Block 4: Armor */}
         <div className="hud-block armor-block">
-          <span className="hud-label"><Shield size={12} /> BIO-ARMOR</span>
+          <span className="hud-label"><Shield size={12} /> {t.hudArmor}</span>
           <span className="hud-value armor-val">{gameState.armor}%</span>
         </div>
 
         {/* Block 5: Weapon Selection Panel */}
         <div className="hud-block weapons-block">
-          <span className="hud-label">WEAPONS</span>
+          <span className="hud-label">{t.hudWeapons}</span>
           <div className="weapon-buttons">
             {(["plasma", "shotgun", "annihilator"] as WeaponType[]).map((wKey, idx) => (
               <button
@@ -663,13 +675,13 @@ export function DoomBioShooter() {
 
         {/* Block 6: Organ Health & Threat Meter */}
         <div className="hud-block organ-block">
-          <span className="hud-label"><Activity size={12} /> ORGAN INTEGRITY</span>
+          <span className="hud-label"><Activity size={12} /> {t.hudIntegrity}</span>
           <div className="organ-bar-wrap">
             <div className="organ-bar-fill" style={{ width: `${gameState.organIntegrity}%` }} />
             <span className="organ-bar-text">{gameState.organIntegrity}%</span>
           </div>
           <small className="hud-threat">
-            <Skull size={10} /> VIRUSES: {gameState.enemiesRemaining}
+            <Skull size={10} /> {t.hudViruses(gameState.enemiesRemaining)}
           </small>
         </div>
       </footer>
