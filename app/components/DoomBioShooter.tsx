@@ -54,6 +54,8 @@ export function DoomBioShooter() {
     difficulty: "medium",
     onboardingStep: 1,
     dummiesDestroyed: 0,
+    cursorPos: { x: 0, y: 0 },
+    aimMode: "cursor",
   });
 
   const [selectedModeTab, setSelectedModeTab] = useState<GameMode>("onboarding");
@@ -184,7 +186,17 @@ export function DoomBioShooter() {
     setIsGameStarted(true);
     if (engineRef.current) {
       engineRef.current.initMode(mode, difficulty);
-      if (!isTouchDevice) {
+      if (!isTouchDevice && gameState.aimMode === "pointerlock") {
+        mountRef.current?.requestPointerLock();
+      }
+    }
+  };
+
+  const toggleAimMode = () => {
+    const nextMode = gameState.aimMode === "cursor" ? "pointerlock" : "cursor";
+    if (engineRef.current) {
+      engineRef.current.setAimMode(nextMode);
+      if (nextMode === "pointerlock" && !isTouchDevice && isGameStarted) {
         mountRef.current?.requestPointerLock();
       }
     }
@@ -281,6 +293,17 @@ export function DoomBioShooter() {
             {gameState.gameMode === "onboarding" ? "⚔️ Играть в реальном режиме" : "🎓 Перейти к Обучению"}
           </button>
 
+          {!isTouchDevice && (
+            <button
+              type="button"
+              className={`aim-mode-toggle-btn ${gameState.aimMode === "cursor" ? "active" : ""}`}
+              onClick={toggleAimMode}
+              title="Переключить режим управления прицелом"
+            >
+              {gameState.aimMode === "cursor" ? "🎯 Прицел: Курсор мыши" : "🔒 Прицел: Pointer Lock"}
+            </button>
+          )}
+
           <span className="selector-label">ЛОКАЦИЯ (АРТЕРИИ, ВЕНЫ, КАПИЛЛЯРЫ):</span>
           <div className="organ-pills">
             {organs.map((org) => (
@@ -303,9 +326,24 @@ export function DoomBioShooter() {
       <div className="doom-viewport-container">
         <div ref={mountRef} className="doom-canvas-mount" />
 
-        {/* Crosshair (visible when pointer locked OR on mobile touch device during gameplay) */}
-        {(gameState.isPointerLocked || isTouchDevice) && !gameState.isGameOver && (
-          <div className="doom-crosshair">
+        {/* Crosshair: Desktop Cursor tracking or Center Pointer Lock / Touch */}
+        {!gameState.isGameOver && (
+          <div
+            className={`doom-crosshair ${!gameState.isPointerLocked && !isTouchDevice ? "cursor-follow" : "center-fixed"}`}
+            style={
+              !gameState.isPointerLocked && !isTouchDevice
+                ? {
+                    left: `${((gameState.cursorPos.x + 1) / 2) * 100}%`,
+                    top: `${((-gameState.cursorPos.y + 1) / 2) * 100}%`,
+                    transform: "translate(-50%, -50%)",
+                  }
+                : {
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                  }
+            }
+          >
             <Crosshair size={28} className={gameState.isFiring ? "firing" : ""} />
           </div>
         )}
@@ -383,10 +421,16 @@ export function DoomBioShooter() {
           </div>
         )}
 
-        {/* Click to re-acquire pointer lock if unlocked on desktop during game */}
-        {isGameStarted && !gameState.isPointerLocked && !isTouchDevice && !gameState.isGameOver && (
+        {/* Desktop Resume or Cursor Prompt Overlay */}
+        {isGameStarted && !gameState.isPointerLocked && !isTouchDevice && !gameState.isGameOver && gameState.aimMode === "pointerlock" && (
           <div className="doom-resume-prompt" onClick={() => mountRef.current?.requestPointerLock()}>
-            <span>🎯 КЛИКНИТЕ ПО ЭКРАНУ ДЛЯ УПРАВЛЕНИЯ ПРИЦЕЛОМ</span>
+            <span>🎯 КЛИКНИТЕ ПО ЭКРАНУ ДЛЯ ВХОДА В POINTER LOCK</span>
+          </div>
+        )}
+
+        {isGameStarted && !gameState.isPointerLocked && !isTouchDevice && !gameState.isGameOver && gameState.aimMode === "cursor" && (
+          <div className="doom-cursor-hint">
+            <span>🎯 ДВИГАЙТЕ МЫШЬЮ ДЛЯ ПРИЦЕЛИВАНИЯ | ЛКМ — СТРЕЛЬБА</span>
           </div>
         )}
 
