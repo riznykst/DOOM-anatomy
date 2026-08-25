@@ -160,6 +160,8 @@ export type GameState = {
   difficulty: Difficulty;
   onboardingStep: number;
   dummiesDestroyed: number;
+  cursorPos: { x: number; y: number };
+  aimMode: "pointerlock" | "cursor";
 };
 
 type GameCallbacks = {
@@ -315,6 +317,8 @@ export class DoomGameEngine {
   private playerVel = new THREE.Vector3();
   private cameraPitch = 0;
   private cameraYaw = 0;
+  private cursorPos = new THREE.Vector2(0, 0); // Normalized (-1 to 1)
+  private aimMode: "pointerlock" | "cursor" = "cursor";
   private keysPressed: Record<string, boolean> = {};
   private isPointerLocked = false;
   private isMouseDown = false;
@@ -531,7 +535,7 @@ export class DoomGameEngine {
     const canvas = this.renderer.domElement;
 
     canvas.addEventListener("click", () => {
-      if (!this.isPointerLocked && !this.isGameOver && !this.isTouchDevice) {
+      if (this.aimMode === "pointerlock" && !this.isPointerLocked && !this.isGameOver && !this.isTouchDevice) {
         canvas.requestPointerLock();
       }
     });
@@ -555,6 +559,14 @@ export class DoomGameEngine {
     canvas.addEventListener("touchcancel", this.onTouchEnd, { passive: false });
   }
 
+  public setAimMode(mode: "pointerlock" | "cursor") {
+    this.aimMode = mode;
+    if (mode === "cursor" && document.pointerLockElement) {
+      document.exitPointerLock();
+    }
+    this.emitState();
+  }
+
   private onKeyDown = (e: KeyboardEvent) => {
     this.keysPressed[e.code] = true;
     if (e.code === "Digit1") this.setWeapon("plasma");
@@ -570,9 +582,40 @@ export class DoomGameEngine {
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.isPointerLocked && !this.isTouchDevice) return;
-    const sensitivity = 0.0022;
-    this.rotateCamera(e.movementX * sensitivity, e.movementY * sensitivity);
+    const canvas = this.renderer.domElement;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const normX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const normY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+        this.cursorPos.set(
+          THREE.MathUtils.clamp(normX, -1, 1),
+          THREE.MathUtils.clamp(normY, -1, 1)
+        );
+      }
+    }
+
+    if (this.isPointerLocked) {
+      const sensitivity = 0.0022;
+      this.rotateCamera(e.movementX * sensitivity, e.movementY * sensitivity);
+      this.cursorPos.set(0, 0);
+    } else if (!this.isTouchDevice && this.aimMode === "cursor") {
+      // Unlocked cursor look: softly turn camera when mouse approaches screen edges
+      const deadZone = 0.35;
+      let turnX = 0;
+      let turnY = 0;
+
+      if (Math.abs(this.cursorPos.x) > deadZone) {
+        turnX = (this.cursorPos.x - Math.sign(this.cursorPos.x) * deadZone) * 0.025;
+      }
+      if (Math.abs(this.cursorPos.y) > deadZone) {
+        turnY = -(this.cursorPos.y - Math.sign(this.cursorPos.y) * deadZone) * 0.02;
+      }
+
+      if (turnX !== 0 || turnY !== 0) {
+        this.rotateCamera(turnX, turnY);
+      }
+    }
   };
 
   public rotateCamera(dxSensitivity: number, dySensitivity: number) {
@@ -644,7 +687,7 @@ export class DoomGameEngine {
   private onMouseDown = (e: MouseEvent) => {
     if (e.button === 0) {
       this.isMouseDown = true;
-      if (this.isPointerLocked) {
+      if (this.isPointerLocked || (!this.isTouchDevice && this.aimMode === "cursor")) {
         this.tryFireWeapon();
       }
     }
@@ -886,10 +929,19 @@ export class DoomGameEngine {
     else if (this.activeWeapon === "annihilator") this.synth.play("shoot_annihilator");
 
     // Performance optimization: Reusable scratch objects for direction, rotation matrix, and muzzle position
-    const shootDir = scratchVecA.set(0, 0, -1);
-    scratchEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
-    scratchMatrix.makeRotationFromEuler(scratchEuler);
-    shootDir.applyMatrix4(scratchMatrix).normalize();
+    const shootDir = scratchVecA;
+
+    if (this.isPointerLocked || this.isTouchDevice || (this.cursorPos.x === 0 && this.cursorPos.y === 0)) {
+      shootDir.set(0, 0, -1);
+      scratchEuler.set(this.cameraPitch, this.cameraYaw, 0, "YXZ");
+      scratchMatrix.makeRotationFromEuler(scratchEuler);
+      shootDir.applyMatrix4(scratchMatrix).normalize();
+    } else {
+      // Calculate shooting direction towards mouse cursor on screen
+      scratchVecC.set(this.cursorPos.x, this.cursorPos.y, 0.5);
+      scratchVecC.unproject(this.camera);
+      shootDir.copy(scratchVecC).sub(this.camera.position).normalize();
+    }
 
     const muzzlePos = scratchVecB.copy(this.playerPos).addScaledVector(shootDir, 0.4);
 
@@ -993,7 +1045,7 @@ export class DoomGameEngine {
   };
 
   private updatePlayerMovement(delta: number) {
-    if (!this.isPointerLocked && !this.isTouchDevice) return;
+    if (!this.isPointerLocked && !this.isTouchDevice && this.aimMode !== "cursor") return;
 
     const speed = 6.5;
     // Reuse scratch vector to avoid per-frame vector instantiation
@@ -1333,6 +1385,8 @@ export class DoomGameEngine {
       difficulty: this.difficulty,
       onboardingStep: this.onboardingStep,
       dummiesDestroyed: this.dummiesDestroyed,
+      cursorPos: { x: this.cursorPos.x, y: this.cursorPos.y },
+      aimMode: this.aimMode,
     });
   }
 

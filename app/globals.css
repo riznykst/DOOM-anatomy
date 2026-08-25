@@ -96,6 +96,25 @@
   color: #000;
 }
 
+.aim-mode-toggle-btn {
+  background: #0f172a;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.aim-mode-toggle-btn.active, .aim-mode-toggle-btn:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #38bdf8;
+}
+
 .doom-organ-selector {
   display: flex;
   align-items: center;
@@ -156,17 +175,21 @@
 .doom-canvas-mount {
   width: 100%;
   height: 100%;
+  cursor: crosshair;
 }
 
 /* Crosshair */
 .doom-crosshair {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   color: #38bdf8;
   pointer-events: none;
+  z-index: 15;
   transition: transform 0.05s ease;
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
+}
+
+.doom-crosshair.cursor-follow {
+  transition: left 0.02s linear, top 0.02s linear, transform 0.05s ease;
 }
 
 .doom-crosshair .firing {
@@ -432,7 +455,7 @@
   background: #16a34a;
 }
 
-.doom-resume-prompt {
+.doom-resume-prompt, .doom-cursor-hint {
   position: absolute;
   bottom: 96px;
   left: 50%;
@@ -448,6 +471,9 @@
   z-index: 12;
   box-shadow: 0 0 15px rgba(56, 189, 248, 0.35);
   animation: pulse 1s infinite alternate;
+  pointer-events: auto;
+  text-align: center;
+  max-width: 90%;
 }
 
 .start-modal h2 {
@@ -643,13 +669,13 @@
   z-index: 10;
 }
 
-/* Responsive Styles for Mobile & Small Displays */
-@media (max-width: 768px) {
+/* Responsive Styles for Mobile, Tablet & Hybrid Displays */
+@media (max-width: 1024px) {
   .doom-header {
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
-    padding: 6px 8px;
+    padding: 6px 10px;
   }
 
   .doom-brand {
@@ -662,21 +688,26 @@
   }
 
   .doom-organ-selector {
-    justify-content: space-between;
+    justify-content: flex-start;
     width: 100%;
     gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
 
   .selector-label {
     display: none;
   }
 
-  .mode-switch-btn {
+  .mode-switch-btn, .aim-mode-toggle-btn {
     font-size: 10px;
     padding: 3px 6px;
     margin-right: 0;
+    flex-shrink: 0;
   }
+}
 
+@media (max-width: 640px) {
   .start-modal {
     padding: 16px;
     max-width: 95%;
@@ -694,6 +725,8 @@
     top: 6px;
     padding: 8px 12px;
     width: 96%;
+    max-height: 40vh;
+    overflow-y: auto;
   }
 
   .onboarding-hud-header strong {
@@ -725,29 +758,41 @@
     justify-content: center;
   }
 
+  .weapon-btn {
+    padding: 6px 10px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .hud-value {
     font-size: 18px;
   }
 
   .virtual-joystick-base {
-    width: 80px;
-    height: 80px;
+    width: 84px;
+    height: 84px;
   }
 
   .virtual-joystick-stick {
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
   }
 
   .touch-btn.fire-btn {
-    width: 60px;
-    height: 60px;
+    width: 64px;
+    height: 64px;
     font-size: 15px;
   }
 
   .touch-btn.aux-btn {
-    width: 38px;
-    height: 38px;
+    width: 42px;
+    height: 42px;
+  }
+
+  .doom-resume-prompt, .doom-cursor-hint {
+    bottom: 120px;
+    font-size: 11px;
+    padding: 6px 12px;
   }
 }
 
